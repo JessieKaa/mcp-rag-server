@@ -23,16 +23,19 @@ dependencies = [
     "mcp[cli]",
     "python-dotenv",
     "psycopg2-binary",
-    "sentence-transformers",
     "markdown",
-    "numpy",
     "markitdown[all]",
+    "sentence-transformers",
+    "numpy",
     "sentencepiece>=0.2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+]
+openai = [
+    "openai>=1.0.0",
 ]
 
 [project.scripts]
