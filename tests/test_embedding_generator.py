@@ -10,7 +10,7 @@ from embedding_generator import EmbeddingGenerator
 
 
 class TestLocalEmbeddingGenerator(unittest.TestCase):
-    """ローカル (sentence-transformers) バックエンドのテスト"""
+    """本地 (sentence-transformers) 后端测试"""
 
     def setUp(self):
         self.fake_st = MagicMock()
@@ -86,7 +86,7 @@ class TestLocalEmbeddingGenerator(unittest.TestCase):
 
 
 class TestOpenAIEmbeddingGenerator(unittest.TestCase):
-    """OpenAI 互換 API バックエンドのテスト"""
+    """OpenAI 兼容 API 后端测试"""
 
     def _make_fake_openai(self):
         fake_openai = MagicMock()
@@ -107,7 +107,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self._modules.stop()
 
     def test_openai_init_with_api_key_only(self):
-        """API_KEY のみ設定 → 官方端点 → 成功"""
+        """仅设置 API_KEY → 官方端点 → 成功"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         env = {
@@ -123,7 +123,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertEqual(call_kwargs.kwargs["api_key"], "sk-test")
 
     def test_openai_init_with_base_url_no_key(self):
-        """非公式 BASE_URL + KEY なし → 自ホスト → 成功 (プレースホルダー KEY)"""
+        """非官方 BASE_URL + 无 KEY → 自托管 → 成功（使用占位符 KEY）"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         env = {
@@ -138,7 +138,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertEqual(call_kwargs.kwargs["api_key"], "no-api-key")
 
     def test_openai_init_no_key_no_url_raises_value_error(self):
-        """KEY なし + URL なし → 官方端点 → ValueError"""
+        """无 KEY + 无 URL → 官方端点 → ValueError"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         env = {
@@ -152,7 +152,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertIn("EMBEDDING_API_KEY", str(ctx.exception))
 
     def test_openai_init_official_base_url_no_key_raises(self):
-        """公式 BASE_URL 明示 + KEY なし → 仍按公式端点 → ValueError"""
+        """明确指定官方 BASE_URL + 无 KEY → 仍按官方端点处理 → ValueError"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         env = {
@@ -167,7 +167,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertIn("EMBEDDING_API_KEY", str(ctx.exception))
 
     def test_openai_generate_embedding_calls_create(self):
-        """generate_embedding が embeddings.create を呼び出す"""
+        """generate_embedding 调用 embeddings.create"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         env = {
@@ -186,7 +186,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             )
 
     def test_openai_generate_embeddings_batches(self):
-        """100 テキスト / batch_size=32 → create が 4 回呼ばれる"""
+        """100 个文本 / batch_size=32 → create 被调用 4 次"""
         fake_openai = MagicMock()
         mock_client = MagicMock()
         fake_openai.OpenAI.return_value = mock_client
@@ -214,7 +214,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertEqual(mock_client.embeddings.create.call_count, 4)
 
     def test_openai_no_prefix_by_default(self):
-        """デフォルトでプレフィックスなし"""
+        """默认无前缀"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         env = {
@@ -234,7 +234,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             )
 
     def test_openai_missing_package_raises_helpful_import_error(self):
-        """openai パッケージ未インストール → インストールガイド付き ImportError"""
+        """未安装 openai 包 → 带安装指南的 ImportError"""
         real_import = __import__
 
         def fake_import(name, *args, **kwargs):
@@ -255,12 +255,12 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
                 self.assertIn("pip install mcp-rag-server[openai]", str(ctx.exception))
 
     def test_openai_response_count_mismatch_raises(self):
-        """API レスポンス数 ≠ 入力数 → RuntimeError"""
+        """API 响应数量 ≠ 输入数量 → RuntimeError"""
         fake_openai = MagicMock()
         mock_client = MagicMock()
         fake_openai.OpenAI.return_value = mock_client
         mock_response = MagicMock()
-        mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]  # 1 件のみ
+        mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]  # 仅 1 条
         mock_client.embeddings.create.return_value = mock_response
 
         self._start_openai_mock(fake_openai)
@@ -277,7 +277,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertIn("returned 1 embeddings for 2 inputs", str(ctx.exception))
 
     def test_openai_invalid_batch_size_raises_value_error(self):
-        """不正なバッチサイズ → ValueError"""
+        """无效批处理大小 → ValueError"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         for bad_val in ["0", "-1", "abc"]:
@@ -294,7 +294,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
                         EmbeddingGenerator()
 
     def test_openai_malformed_base_url_raises_value_error(self):
-        """畸形 EMBEDDING_BASE_URL → ValueError"""
+        """格式错误的 EMBEDDING_BASE_URL → ValueError"""
         fake = self._make_fake_openai()
         self._start_openai_mock(fake)
         for bad_url in ["not-a-url", "localhost:9997", "ftp://bad-scheme.com"]:
@@ -313,10 +313,10 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
 
 
 class TestProviderAndDimensionValidation(unittest.TestCase):
-    """共通バリデーションのテスト（両バックエンドに共通）"""
+    """通用验证测试（适用于两种后端）"""
 
     def test_invalid_provider_raises_value_error(self):
-        """不明な EMBEDDING_PROVIDER → ValueError"""
+        """未知的 EMBEDDING_PROVIDER → ValueError"""
         fake_st = MagicMock()
         with patch.dict(sys.modules, {"sentence_transformers": fake_st}):
             env = {
@@ -329,11 +329,11 @@ class TestProviderAndDimensionValidation(unittest.TestCase):
                 self.assertIn("'local' or 'openai'", str(ctx.exception))
 
     def test_dimension_mismatch_raises_clear_error(self):
-        """次元不一致 → clear and re-index を含む ValueError"""
+        """维度不一致 → 包含 clear and re-index 的 ValueError"""
         fake_st = MagicMock()
         fake_model = MagicMock()
         fake_st.SentenceTransformer.return_value = fake_model
-        # 3 次元を返すが EMBEDDING_DIM=1024 を期待
+        # 返回 3 维但期望 EMBEDDING_DIM=1024
         fake_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
         with patch.dict(sys.modules, {"sentence_transformers": fake_st}):
             env = {
