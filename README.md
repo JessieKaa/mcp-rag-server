@@ -9,7 +9,8 @@ MCP RAG Server 是一个符合 Model Context Protocol (MCP) 标准的 RAG（Retr
 ## 功能
 
 - **MCP 服务器基本实现**
-  - 基于 JSON-RPC over stdio 运行
+  - 基于官方 MCP Python SDK 构建
+  - 支持 JSON-RPC over **stdio**（默认）和 **HTTP SSE** 两种传输方式
   - 提供工具注册和执行机制
   - 错误处理和日志记录
 
@@ -214,23 +215,44 @@ Run `python -m src.cli clear` then re-index after updating EMBEDDING_DIM.
 
 ### 启动 MCP 服务器
 
-#### 使用 uv 的情况（推荐）
+#### stdio 模式（默认，适用于 Claude Desktop / Cline 等 MCP 主机）
 
 ```bash
+# 使用 uv（推荐）
 uv run python -m src.main
-```
 
-指定选项的情况：
-
-```bash
+# 指定服务器名称等选项
 uv run python -m src.main --name "my-rag-server" --version "1.0.0" --description "My RAG Server"
-```
 
-#### 使用普通 Python 的情况
-
-```bash
+# 使用普通 Python
 python -m src.main
 ```
+
+#### HTTP SSE 模式（适用于容器化部署、多客户端共享等场景）
+
+```bash
+# 在本地 8000 端口启动
+uv run python -m src.main --transport sse --port 8000
+
+# 指定监听地址
+uv run python -m src.main --transport sse --host 0.0.0.0 --port 8000
+```
+
+启动后，客户端可通过以下端点连接：
+- `GET  http://localhost:8000/sse` — 建立 SSE 连接，接收 JSON-RPC 响应
+- `POST http://localhost:8000/messages/?session_id=<id>` — 发送 JSON-RPC 请求
+
+#### 可用选项一览
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `--transport` | `stdio` | 传输方式：`stdio` 或 `sse` |
+| `--host` | `0.0.0.0` | SSE 模式的监听地址 |
+| `--port` | `8000` | SSE 模式的监听端口 |
+| `--name` | `mcp-rag-server` | 服务器名称 |
+| `--version` | `0.1.0` | 版本号 |
+| `--description` | *(默认说明)* | 服务器描述 |
+| `--module` | *(无)* | 额外工具模块（如 `myapp.tools`） |
 
 ### 命令行工具（CLI）的使用方法
 
@@ -278,7 +300,7 @@ python -m src.cli count
 
 要在 MCP 主机（Claude Desktop、Cline、Cursor 等）中使用本服务器，请进行如下设置。关于设置用的 JSON 文件，请参考各 MCP 主机的文档。
 
-#### 设置示例
+#### stdio 模式（推荐）
 
 ```json
 {
@@ -298,23 +320,34 @@ python -m src.cli count
 }
 ```
 
-#### 设置要点
+#### SSE 模式（服务器单独部署的情况）
 
-- `command`：`uv`（推荐）或 `python`
-- `args`：执行参数数组
-- `/path/to/mcp-rag-server`：请替换为本仓库的实际路径
+先单独启动服务器：
+
+```bash
+uv run python -m src.main --transport sse --port 8000
+```
+
+然后在 MCP 主机中指定 SSE 端点（各主机的具体写法可能有所不同）：
+
+```json
+{
+  "mcpServers": {
+    "mcp-rag-server": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
 
 #### 不使用 uv 的情况
 
-在未安装 uv 的环境中，可以使用普通 Python：
+在未安装 uv 的环境中，可以使用普通 Python（stdio 模式）：
 
 ```json
 {
   "command": "python",
-  "args": [
-    "-m",
-    "src.main"
-  ],
+  "args": ["-m", "src.main"],
   "cwd": "/path/to/mcp-rag-server"
 }
 ```
@@ -535,17 +568,18 @@ mcp-rag-server/
 │   └── processed/     # 已处理文件（文本已提取）
 │       └── file_registry.json  # 已处理文件信息（用于增量索引）
 ├── docs/
-│   └── design.md      # 设计文档
+│   └── design.md      # 需求与设计文档
 ├── logs/              # 日志文件
 ├── src/
 │   ├── __init__.py
 │   ├── document_processor.py  # 文档处理模块
-│   ├── embedding_generator.py # 嵌入向量生成模块
-│   ├── example_tool.py        # 示例工具模块
-│   ├── main.py                # 主入口点
-│   ├── mcp_server.py          # MCP 服务器模块
+│   ├── embedding_generator.py # 嵌入向量生成模块（支持本地/OpenAI 兼容 API）
+│   ├── example_tool.py        # 示例工具模块（旧版插件示例）
+│   ├── main.py                # 主入口点（支持 --transport stdio/sse）
+│   ├── mcp_server.py          # 旧版 JSON-RPC over stdio 服务器（保留兼容）
 │   ├── rag_service.py         # RAG 服务模块
-│   ├── rag_tools.py           # RAG 工具模块
+│   ├── rag_tools.py           # RAG 工具模块（含 SDK 路径）
+│   ├── server.py              # SDK 服务器工厂、ToolRegistry、传输运行函数
 │   └── vector_database.py     # 向量数据库模块
 ├── tests/
 │   ├── __init__.py
@@ -553,9 +587,11 @@ mcp-rag-server/
 │   ├── test_document_processor.py
 │   ├── test_embedding_generator.py
 │   ├── test_example_tool.py
-│   ├── test_mcp_server.py
+│   ├── test_mcp_server.py       # 旧版服务器单元测试
 │   ├── test_rag_service.py
 │   ├── test_rag_tools.py
+│   ├── test_server.py           # SDK 服务器单元测试（anyio）
+│   ├── test_sse_transport.py    # SSE 传输集成测试（真实 HTTP 服务器）
 │   └── test_vector_database.py
 ├── .env           # 环境变量设置文件
 ├── .gitignore

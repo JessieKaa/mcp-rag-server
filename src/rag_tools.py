@@ -6,7 +6,10 @@ RAG 工具模块
 
 import os
 
-from typing import Dict, Any
+from typing import TYPE_CHECKING, Dict, Any
+
+import anyio
+from mcp import types as mcp_types
 
 from .document_processor import DocumentProcessor
 from .embedding_generator import EmbeddingGenerator
@@ -15,7 +18,16 @@ from .rag_service import RAGService
 
 from dotenv import load_dotenv
 
+if TYPE_CHECKING:
+    from .server import ToolRegistry
+
 load_dotenv()
+
+# 使用 server 模块中的统一执行锁，确保内置工具和旧版插件工具都经过同一串行化路径
+# 延迟导入避免循环依赖
+def _get_tool_lock():
+    from .server import tool_execution_lock
+    return tool_execution_lock
 
 
 def register_rag_tools(server, rag_service: RAGService):
@@ -245,6 +257,72 @@ def get_document_count_handler(params: Dict[str, Any], rag_service: RAGService) 
             ],
             "isError": True,
         }
+
+
+def _sync_result_to_content(result: Dict[str, Any]) -> list:
+    """将同步处理函数返回的字典转换为 SDK TextContent 列表，isError=True 时抛出 RuntimeError。"""
+    if isinstance(result, dict) and "content" in result:
+        if result.get("isError"):
+            text_parts = [
+                item.get("text", str(item))
+                for item in result["content"]
+                if isinstance(item, dict)
+            ]
+            raise RuntimeError(" ".join(text_parts))
+        return [
+            mcp_types.TextContent(type="text", text=item.get("text", str(item)))
+            if isinstance(item, dict) and item.get("type") == "text"
+            else mcp_types.TextContent(type="text", text=str(item))
+            for item in result["content"]
+        ]
+    return [mcp_types.TextContent(type="text", text=str(result))]
+
+
+def register_rag_tools_sdk(registry: "ToolRegistry", rag_service: RAGService) -> None:
+    """
+    将 RAG 工具注册到 ToolRegistry（SDK 路径）。
+
+    每个处理函数通过 anyio.to_thread.run_sync + _tool_lock 包装同步调用。
+    """
+
+    search_tool = mcp_types.Tool(
+        name="search",
+        description="进行向量检索",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "检索查询"},
+                "limit": {"type": "integer", "description": "返回结果的数量（默认：5）", "default": 5},
+                "with_context": {"type": "boolean", "description": "是否获取前后分块（默认：true）", "default": True},
+                "context_size": {"type": "integer", "description": "获取前后分块的数量（默认：1）", "default": 1},
+                "full_document": {"type": "boolean", "description": "是否获取文档全文（默认：false）", "default": False},
+            },
+            "required": ["query"],
+        },
+    )
+
+    count_tool = mcp_types.Tool(
+        name="get_document_count",
+        description="获取索引中的文档数量",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+    )
+
+    async def _search_async(arguments: dict) -> list:
+        def _run():
+            with _get_tool_lock():
+                return search_handler(arguments, rag_service)
+        result = await anyio.to_thread.run_sync(_run)
+        return _sync_result_to_content(result)
+
+    async def _count_async(arguments: dict) -> list:
+        def _run():
+            with _get_tool_lock():
+                return get_document_count_handler(arguments, rag_service)
+        result = await anyio.to_thread.run_sync(_run)
+        return _sync_result_to_content(result)
+
+    registry.register(search_tool, _search_async)
+    registry.register(count_tool, _count_async)
 
 
 def create_rag_service_from_env() -> RAGService:

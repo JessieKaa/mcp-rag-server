@@ -42,7 +42,7 @@
 ### 1.5 约束条件
 
 - 运行于 Python 3.10 以上
-- 基于 JSON-RPC over stdio 运行
+- 支持 JSON-RPC over stdio（默认）和 HTTP SSE 两种传输方式
 - 需要 PostgreSQL 和 pgvector 扩展
 
 ### 1.6 开发环境
@@ -181,16 +181,21 @@ sequenceDiagram
 ```
 
 #### 2.1.2 主要组件
-- **MCP 服务器**
-  - 监听 JSON-RPC over stdio
-  - 管理工具的注册和执行
+- **SDK 服务器（`server.py`）**
+  - 基于官方 MCP Python SDK（`mcp.server.lowlevel.Server`）
+  - `ToolRegistry`：防止重复注册的工具聚合中心
+  - 支持 stdio 和 HTTP SSE 两种传输方式
+  - 旧版插件通过 `_adapt_legacy_tools()` 自动桥接
+- **旧版 MCP 服务器（`mcp_server.py`，保留兼容）**
+  - 手写的 JSON-RPC over stdio 实现
+  - 供旧版测试和旧版插件使用，不再作为主传输层
 - **文档管理**
   - 读取和解析多种格式的文档
   - 使用 Markitdown 进行格式转换
   - 分块处理
   - 通过文件注册表进行增量管理
 - **嵌入向量生成**
-  - 使用 multilingual-e5-large 模型
+  - 支持本地模型（sentence-transformers）和 OpenAI 兼容 API
   - 从文本生成向量表示
 - **向量数据库**
   - 使用 PostgreSQL 和 pgvector
@@ -200,7 +205,31 @@ sequenceDiagram
 
 #### 2.2.1 类设计
 
-##### `MCPServer`
+##### `ToolRegistry`（`server.py`）
+```python
+class ToolRegistry:
+    def register(tool: mcp_types.Tool, handler: Callable) -> None
+    # 同名工具重复注册时立即抛出 ValueError
+    def wire(server: LowLevelServer) -> None
+    # 在 SDK 服务器上安装唯一的 list_tools / call_tool 处理函数对
+```
+
+**关键函数（`server.py`）**:
+```python
+def create_sdk_server(name, version, description, rag_service, extra_module=None) -> LowLevelServer
+# 构建 ToolRegistry → 注册内置工具 → 桥接旧版插件 → 返回 SDK 服务器
+
+async def run_stdio(server: LowLevelServer) -> None
+# 以 stdio 传输方式运行
+
+def run_sse(server: LowLevelServer, host: str, port: int) -> None
+# 以 HTTP SSE 传输方式运行（调用 uvicorn）
+
+def create_sse_app(server: LowLevelServer) -> Starlette
+# 返回 Starlette ASGI 应用（/sse + /messages/ 端点）
+```
+
+##### `MCPServer`（`mcp_server.py`，旧版，保留兼容）
 ```python
 class MCPServer:
     def register_tool(name: str, description: str, input_schema: Dict[str, Any], handler: Callable) -> None
@@ -364,15 +393,23 @@ CREATE INDEX idx_documents_embedding ON documents USING ivfflat (embedding vecto
 mcp-rag-server/
 ├── data/
 │   ├── source/        # 原始文档（支持层级结构）
-│   │   ├── markdown/  # Markdown 文件
-│   │   ├── docs/      # 文档文件
-│   │   └── slides/    # 演示文稿文件
-│   └── processed/     # 已处理文件（文本已提取）
-│       └── file_registry.json  # 已处理文件信息（用于增量索引）
+│   └── processed/     # 已处理文件与文件注册表
 ├── docs/              # 项目文档
 ├── logs/              # 日志文件
-├── src/               # 源代码
-└── tests/             # 测试代码
+├── src/
+│   ├── main.py                # 入口点（--transport stdio/sse）
+│   ├── server.py              # SDK 服务器工厂、ToolRegistry、传输函数
+│   ├── mcp_server.py          # 旧版 JSON-RPC over stdio（保留兼容）
+│   ├── rag_tools.py           # RAG 工具（旧版 + SDK 两种注册方式）
+│   ├── rag_service.py         # RAG 服务
+│   ├── document_processor.py  # 文档处理
+│   ├── embedding_generator.py # 嵌入向量生成
+│   └── vector_database.py     # PostgreSQL/pgvector 接口
+└── tests/
+    ├── test_mcp_server.py     # 旧版服务器单元测试
+    ├── test_server.py         # SDK 服务器单元测试（anyio）
+    ├── test_sse_transport.py  # SSE 传输集成测试（真实 HTTP 服务器）
+    └── ...
 ```
 
 ### 2.8 开发计划
@@ -425,18 +462,19 @@ EMBEDDING_MODEL=intfloat/multilingual-e5-large
 
 ### 3.3 实现流程
 
-1. 实现基本的 MCP 服务器
-2. 实现文档处理组件
+1. 实现基本的 MCP 服务器（旧版 `mcp_server.py`）
+2. 迁移到官方 SDK（`server.py`：`ToolRegistry`、`create_sdk_server`、传输函数）
+3. 实现文档处理组件
    - 多格式文件读取
    - 使用 Markitdown 进行转换
    - 支持层级结构
    - 通过文件注册表进行增量管理
-3. 实现嵌入向量生成组件
-4. 实现向量数据库组件
-5. 实现 RAG 服务
-6. 实现和注册 MCP 工具
-7. 实现 CLI 命令
-8. 测试和调试
+4. 实现嵌入向量生成组件（本地 + OpenAI 兼容 API）
+5. 实现向量数据库组件
+6. 实现 RAG 服务
+7. 实现和注册 MCP 工具（旧版 `register_rag_tools` + SDK 版 `register_rag_tools_sdk`）
+8. 实现 CLI 命令
+9. 测试和调试
 
 ### 3.4 使用示例
 
