@@ -1,7 +1,7 @@
 """
-ドキュメント処理モジュール
+文档处理模块
 
-マークダウン、テキスト、パワーポイント、PDFなどのファイルの読み込みと解析、チャンク分割を行います。
+负责读取和解析 Markdown、文本、PowerPoint、PDF 等文件，并进行分块处理。
 """
 
 import logging
@@ -17,15 +17,15 @@ import markitdown
 
 class DocumentProcessor:
     """
-    ドキュメント処理クラス
+    文档处理类
 
-    マークダウン、テキスト、パワーポイント、PDFなどのファイルの読み込みと解析、チャンク分割を行います。
+    负责读取和解析 Markdown、文本、PowerPoint、PDF 等文件，并进行分块处理。
 
     Attributes:
-        logger: ロガー
+        logger: 日志记录器
     """
 
-    # サポートするファイル拡張子
+    # 支持的文件扩展名
     SUPPORTED_EXTENSIONS = {
         "text": [".txt", ".md", ".markdown"],
         "office": [".ppt", ".pptx", ".doc", ".docx"],
@@ -34,94 +34,94 @@ class DocumentProcessor:
 
     def __init__(self):
         """
-        DocumentProcessorのコンストラクタ
+        DocumentProcessor 的构造函数
         """
-        # ロガーの設定
+        # 设置日志记录器
         self.logger = logging.getLogger("document_processor")
         self.logger.setLevel(logging.INFO)
 
     def read_file(self, file_path: str) -> str:
         """
-        ファイルを読み込みます。
+        读取文件。
 
         Args:
-            file_path: ファイルのパス
+            file_path: 文件路径
 
         Returns:
-            ファイルの内容
+            文件内容
 
         Raises:
-            FileNotFoundError: ファイルが見つからない場合
-            IOError: ファイルの読み込みに失敗した場合
+            FileNotFoundError: 文件不存在时
+            IOError: 文件读取失败时
         """
         try:
-            # ファイル拡張子を取得
+            # 获取文件扩展名
             ext = Path(file_path).suffix.lower()
 
-            # テキストファイル（マークダウン含む）の場合
+            # 文本文件（包含 Markdown）的情况
             if ext in self.SUPPORTED_EXTENSIONS["text"]:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                    # NUL文字を削除
+                    # 删除 NUL 字符
                     content = content.replace("\x00", "")
-                self.logger.info(f"テキストファイル '{file_path}' を読み込みました")
+                self.logger.info(f"已读取文本文件 '{file_path}'")
                 return content
 
-            # パワーポイント、Word、PDFの場合はmarkitdownを使用して変換
+            # PowerPoint、Word、PDF 的情况使用 markitdown 进行转换
             elif ext in self.SUPPORTED_EXTENSIONS["office"] or ext in self.SUPPORTED_EXTENSIONS["pdf"]:
                 return self.convert_to_markdown(file_path)
 
-            # サポートしていない拡張子の場合
+            # 不支持的扩展名的情况
             else:
-                self.logger.warning(f"サポートしていないファイル形式です: {file_path}")
+                self.logger.warning(f"不支持的文件格式：{file_path}")
                 return ""
 
         except FileNotFoundError:
-            self.logger.error(f"ファイル '{file_path}' が見つかりません")
+            self.logger.error(f"未找到文件 '{file_path}'")
             raise
         except IOError as e:
-            self.logger.error(f"ファイル '{file_path}' の読み込みに失敗しました: {str(e)}")
+            self.logger.error(f"读取文件 '{file_path}' 失败：{str(e)}")
             raise
 
     def convert_to_markdown(self, file_path: str) -> str:
         """
-        パワーポイント、Word、PDFなどのファイルをマークダウンに変換します。
+        将 PowerPoint、Word、PDF 等文件转换为 Markdown。
 
         Args:
-            file_path: ファイルのパス
+            file_path: 文件路径
 
         Returns:
-            マークダウンに変換された内容
+            转换后的 Markdown 内容
 
         Raises:
-            Exception: 変換に失敗した場合
+            Exception: 转换失败时
         """
         try:
-            # ファイルURIを作成
+            # 创建文件 URI
             file_uri = f"file://{os.path.abspath(file_path)}"
 
-            # markitdownを使用して変換
+            # 使用 markitdown 进行转换
             markdown_content = markitdown.MarkItDown().convert_uri(file_uri).markdown
-            # NUL文字を削除
+            # 删除 NUL 字符
             markdown_content = markdown_content.replace("\x00", "")
 
-            self.logger.info(f"ファイル '{file_path}' をマークダウンに変換しました")
+            self.logger.info(f"已将文件 '{file_path}' 转换为 Markdown")
             return markdown_content
         except Exception as e:
-            self.logger.error(f"ファイル '{file_path}' のマークダウン変換に失敗しました: {str(e)}")
+            self.logger.error(f"将文件 '{file_path}' 转换为 Markdown 失败：{str(e)}")
             raise
 
     def split_into_chunks(self, text: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
         """
-        テキストをチャンクに分割します。
+        将文本分割为分块。
 
         Args:
-            text: 分割するテキスト
-            chunk_size: チャンクサイズ（文字数）
-            overlap: チャンク間のオーバーラップ（文字数）
+            text: 要分割的文本
+            chunk_size: 分块大小（字符数）
+            overlap: 分块间的重叠量（字符数）
 
         Returns:
-            チャンクのリスト
+            分块列表
         """
         if not text:
             return []
@@ -133,55 +133,55 @@ class DocumentProcessor:
         while start < text_length:
             end = min(start + chunk_size, text_length)
 
-            # 文の途中で切らないように調整
+            # 调整以避免在句子中间切断
             if end < text_length:
-                # 次の改行または句点を探す
+                # 查找下一个换行符或句号
                 next_newline = text.find("\n", end)
                 next_period = text.find("。", end)
 
                 if next_newline != -1 and (next_period == -1 or next_newline < next_period):
-                    end = next_newline + 1  # 改行を含める
+                    end = next_newline + 1  # 包含换行符
                 elif next_period != -1:
-                    end = next_period + 1  # 句点を含める
+                    end = next_period + 1  # 包含句号
 
             chunks.append(text[start:end])
             start = end - overlap if end - overlap > start else end
 
-            # 終了条件
+            # 终止条件
             if start >= text_length:
                 break
 
-        self.logger.info(f"テキストを {len(chunks)} チャンクに分割しました")
+        self.logger.info(f"已将文本分割为 {len(chunks)} 个分块")
         return chunks
 
     def calculate_file_hash(self, file_path: str) -> str:
         """
-        ファイルのハッシュ値を計算します。
+        计算文件的哈希值。
 
         Args:
-            file_path: ファイルのパス
+            file_path: 文件路径
 
         Returns:
-            ファイルのSHA-256ハッシュ値
+            文件的 SHA-256 哈希值
         """
         try:
             with open(file_path, "rb") as f:
                 file_hash = hashlib.sha256(f.read()).hexdigest()
             return file_hash
         except Exception as e:
-            self.logger.error(f"ファイル '{file_path}' のハッシュ計算に失敗しました: {str(e)}")
-            # エラーが発生した場合は、タイムスタンプをハッシュとして使用
+            self.logger.error(f"计算文件 '{file_path}' 的哈希值失败：{str(e)}")
+            # 发生错误时使用时间戳作为哈希值
             return f"timestamp-{int(time.time())}"
 
     def get_file_metadata(self, file_path: str) -> Dict[str, Any]:
         """
-        ファイルのメタデータを取得します。
+        获取文件的元数据。
 
         Args:
-            file_path: ファイルのパス
+            file_path: 文件路径
 
         Returns:
-            ファイルのメタデータ（ハッシュ値、最終更新日時など）
+            文件的元数据（哈希值、最后修改时间等）
         """
         file_stat = os.stat(file_path)
         return {
@@ -193,13 +193,13 @@ class DocumentProcessor:
 
     def load_file_registry(self, processed_dir: str) -> Dict[str, Dict[str, Any]]:
         """
-        処理済みファイルのレジストリを読み込みます。
+        加载已处理文件的注册表。
 
         Args:
-            processed_dir: 処理済みファイルを保存するディレクトリのパス
+            processed_dir: 保存已处理文件的目录路径
 
         Returns:
-            処理済みファイルのレジストリ（ファイルパスをキーとするメタデータの辞書）
+            已处理文件的注册表（以文件路径为键的元数据字典）
         """
         registry_path = Path(processed_dir) / "file_registry.json"
         if not registry_path.exists():
@@ -209,74 +209,74 @@ class DocumentProcessor:
             with open(registry_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            self.logger.error(f"ファイルレジストリの読み込みに失敗しました: {str(e)}")
+            self.logger.error(f"加载文件注册表失败：{str(e)}")
             return {}
 
     def save_file_registry(self, processed_dir: str, registry: Dict[str, Dict[str, Any]]) -> None:
         """
-        処理済みファイルのレジストリを保存します。
+        保存已处理文件的注册表。
 
         Args:
-            processed_dir: 処理済みファイルを保存するディレクトリのパス
-            registry: 処理済みファイルのレジストリ
+            processed_dir: 保存已处理文件的目录路径
+            registry: 已处理文件的注册表
         """
         registry_path = Path(processed_dir) / "file_registry.json"
         try:
-            # 処理済みディレクトリが存在しない場合は作成
+            # 如果已处理目录不存在则创建
             os.makedirs(Path(processed_dir), exist_ok=True)
 
             with open(registry_path, "w", encoding="utf-8") as f:
                 json.dump(registry, f, ensure_ascii=False, indent=2)
-            self.logger.info(f"ファイルレジストリを保存しました: {registry_path}")
+            self.logger.info(f"已保存文件注册表：{registry_path}")
         except Exception as e:
-            self.logger.error(f"ファイルレジストリの保存に失敗しました: {str(e)}")
+            self.logger.error(f"保存文件注册表失败：{str(e)}")
 
     def process_file(
         self, file_path: str, processed_dir: str, chunk_size: int = 500, overlap: int = 100
     ) -> List[Dict[str, Any]]:
         """
-        ファイルを処理します。
+        处理文件。
 
         Args:
-            file_path: ファイルのパス
-            processed_dir: 処理済みファイルを保存するディレクトリのパス
-            chunk_size: チャンクサイズ（文字数）
-            overlap: チャンク間のオーバーラップ（文字数）
+            file_path: 文件路径
+            processed_dir: 保存已处理文件的目录路径
+            chunk_size: 分块大小（字符数）
+            overlap: 分块间的重叠量（字符数）
 
         Returns:
-            処理結果のリスト（各要素はチャンク情報を含む辞書）
+            处理结果列表（每个元素是包含分块信息的字典）
         """
         try:
-            # ファイルを読み込む
+            # 读取文件
             content = self.read_file(file_path)
             if not content:
                 return []
 
-            # ファイルパスからディレクトリ構造を取得
+            # 从文件路径获取目录结构
             file_path_obj = Path(file_path)
             relative_path = file_path_obj.relative_to(Path(file_path_obj.parts[0]) / Path(file_path_obj.parts[1]))
             parent_dirs = relative_path.parent.parts
 
-            # ディレクトリ名をサフィックスとして使用
+            # 使用目录名作为后缀
             dir_suffix = "_".join(parent_dirs) if parent_dirs else ""
 
-            # 処理済みファイル名を生成
+            # 生成已处理文件名
             processed_file_name = f"{file_path_obj.stem}{('_' + dir_suffix) if dir_suffix else ''}.md"
             processed_file_path = Path(processed_dir) / processed_file_name
 
-            # 処理済みディレクトリが存在しない場合は作成
+            # 如果已处理目录不存在则创建
             os.makedirs(Path(processed_dir), exist_ok=True)
 
-            # 処理済みファイルに書き込む
+            # 写入已处理文件
             with open(processed_file_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            self.logger.info(f"処理済みファイルを保存しました: {processed_file_path}")
+            self.logger.info(f"已保存已处理文件：{processed_file_path}")
 
-            # チャンクに分割
+            # 分割为分块
             chunks = self.split_into_chunks(content, chunk_size, overlap)
 
-            # 結果を作成
+            # 创建结果
             results = []
             for i, chunk in enumerate(chunks):
                 document_id = f"{processed_file_name}_{i}"
@@ -295,64 +295,64 @@ class DocumentProcessor:
                     }
                 )
 
-            self.logger.info(f"ファイル '{file_path}' を処理しました（{len(results)} チャンク）")
+            self.logger.info(f"已处理文件 '{file_path}'（{len(results)} 个分块）")
             return results
 
         except Exception as e:
-            self.logger.error(f"ファイル '{file_path}' の処理中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"处理文件 '{file_path}' 时发生错误：{str(e)}")
             raise
 
     def process_directory(
         self, source_dir: str, processed_dir: str, chunk_size: int = 500, overlap: int = 100, incremental: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        ディレクトリ内のファイルを処理します。
+        处理目录内的文件。
 
         Args:
-            source_dir: 原稿ファイルが含まれるディレクトリのパス
-            processed_dir: 処理済みファイルを保存するディレクトリのパス
-            chunk_size: チャンクサイズ（文字数）
-            overlap: チャンク間のオーバーラップ（文字数）
-            incremental: 差分のみを処理するかどうか
+            source_dir: 包含原始文件的目录路径
+            processed_dir: 保存已处理文件的目录路径
+            chunk_size: 分块大小（字符数）
+            overlap: 分块间的重叠量（字符数）
+            incremental: 是否仅处理增量
 
         Returns:
-            処理結果のリスト（各要素はチャンク情報を含む辞書）
+            处理结果列表（每个元素是包含分块信息的字典）
         """
         results = []
         source_directory = Path(source_dir)
 
         if not source_directory.exists() or not source_directory.is_dir():
-            self.logger.error(f"ディレクトリ '{source_dir}' が見つからないか、ディレクトリではありません")
-            raise FileNotFoundError(f"ディレクトリ '{source_dir}' が見つからないか、ディレクトリではありません")
+            self.logger.error(f"未找到目录 '{source_dir}' 或不是目录")
+            raise FileNotFoundError(f"未找到目录 '{source_dir}' 或不是目录")
 
-        # サポートするファイル拡張子を全て取得
+        # 获取所有支持的文件扩展名
         all_extensions = []
         for ext_list in self.SUPPORTED_EXTENSIONS.values():
             all_extensions.extend(ext_list)
 
-        # ファイルを検索
+        # 搜索文件
         files = []
         for ext in all_extensions:
             files.extend(list(source_directory.glob(f"**/*{ext}")))
 
-        self.logger.info(f"ディレクトリ '{source_dir}' 内に {len(files)} 個のファイルが見つかりました")
+        self.logger.info(f"在目录 '{source_dir}' 内找到 {len(files)} 个文件")
 
-        # 差分処理の場合、ファイルレジストリを読み込む
+        # 增量处理时，加载文件注册表
         if incremental:
             file_registry = self.load_file_registry(processed_dir)
-            self.logger.info(f"ファイルレジストリから {len(file_registry)} 個のファイル情報を読み込みました")
+            self.logger.info(f"从文件注册表读取了 {len(file_registry)} 条文件信息")
         else:
             file_registry = {}
 
-        # 処理対象のファイルを特定
+        # 确定要处理的文件
         files_to_process = []
         for file_path in files:
             str_path = str(file_path)
             if incremental:
-                # ファイルのメタデータを取得
+                # 获取文件元数据
                 current_metadata = self.get_file_metadata(str_path)
 
-                # レジストリに存在しない、またはハッシュ値が変更されている場合のみ処理
+                # 仅当注册表中不存在或哈希值已更改时才处理
                 if (
                     str_path not in file_registry
                     or file_registry[str_path]["hash"] != current_metadata["hash"]
@@ -360,28 +360,28 @@ class DocumentProcessor:
                     or file_registry[str_path]["size"] != current_metadata["size"]
                 ):
                     files_to_process.append(file_path)
-                    # レジストリを更新
+                    # 更新注册表
                     file_registry[str_path] = current_metadata
             else:
-                # 差分処理でない場合は全てのファイルを処理
+                # 非增量处理时处理所有文件
                 files_to_process.append(file_path)
-                # レジストリを更新
+                # 更新注册表
                 file_registry[str_path] = self.get_file_metadata(str_path)
 
-        self.logger.info(f"処理対象のファイル数: {len(files_to_process)} / {len(files)}")
+        self.logger.info(f"待处理文件数：{len(files_to_process)} / {len(files)}")
 
-        # 各ファイルを処理
+        # 处理各个文件
         for file_path in files_to_process:
             try:
                 file_results = self.process_file(str(file_path), processed_dir, chunk_size, overlap)
                 results.extend(file_results)
             except Exception as e:
-                self.logger.error(f"ファイル '{file_path}' の処理中にエラーが発生しました: {str(e)}")
-                # エラーが発生しても処理を続行
+                self.logger.error(f"处理文件 '{file_path}' 时发生错误：{str(e)}")
+                # 发生错误仍继续处理
                 continue
 
-        # ファイルレジストリを保存
+        # 保存文件注册表
         self.save_file_registry(processed_dir, file_registry)
 
-        self.logger.info(f"ディレクトリ '{source_dir}' 内のファイルを処理しました（合計 {len(results)} チャンク）")
+        self.logger.info(f"已处理目录 '{source_dir}' 内的文件（共 {len(results)} 个分块）")
         return results

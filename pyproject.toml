@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mcp-rag-server"
 version = "0.1.0"
-description = "MCP RAG Server - Model Context Protocol (MCP)に準拠したRAG機能を持つPythonサーバー"
+description = "MCP RAG Server - 符合 Model Context Protocol (MCP) 标准的 RAG 功能 Python 服务器"
 authors = [
     {name = "MCP Server Team"}
 ]

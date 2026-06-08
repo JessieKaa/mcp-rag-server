@@ -1,1 +1,1 @@
-# このファイルは notion_mcp_light パッケージを認識するためのものです。
+# 此文件用于识别 notion_mcp_light 包。

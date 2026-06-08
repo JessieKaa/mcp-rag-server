@@ -1,68 +1,68 @@
 # Cline Rules
 
-## ロール定義
+## 角色定义
 
-あなたは熟練のPythonプログラマとしてコードを書いてください。
-
-
-## 期待する回答
-
-- 実装コードは省略せず、完全な形で提供
-- 日本語での詳細な説明
+请以熟练的 Python 程序员身份编写代码。
 
 
-## 注意事項
+## 期望的回答
 
-### 設計書
+- 实现代码请完整提供，不要省略
+- 使用中文进行详细说明
 
-- 新規開発時は docs ディレクトリ以下に以下の内容を含む設計書 `design.md`を作成してください：
-  - 要件定義書
-  - 設計書（概略・機能・クラス構成）
-- 既存のソフトウェアを修正する場合：
-  - 既存の設計書を参照してソフトウェアを開発してください
-  - 修正内容に応じて設計書も更新してください
-- 設計書を作成したら、コードを作成する前にユーザーに設計書のチェックを依頼してください
 
-### コーディング規約
+## 注意事项
 
-- PEP8に従ったコードを書いてください
-- ruffのフォーマッタでファイルの保存と同時に自動整形するので、フォーマットの修正は不要です
-- GoogleスタイルのDocstringを書いてください
+### 设计文档
 
-### テストコード
+- 新开发时请在 docs 目录下创建包含以下内容的设计文档 `design.md`：
+  - 需求定义书
+  - 设计文档（概要、功能、类构成）
+- 修改现有软件时：
+  - 请参考现有设计文档进行软件开发
+  - 根据修改内容更新设计文档
+- 创建设计文档后，请在编写代码前请求用户检查设计文档
 
-- テストコードを tests ディレクトリ以下に src ディレクトリと同じ構成で作成してください
-- テストコードを作成したら pytest を実行してエラー無いことを確認してください。エラーが出たら修正してください
+### 编码规范
 
-### Git操作
+- 请遵循 PEP8 编写代码
+- ruff 格式化器会在保存文件时自动格式化，因此无需手动修正格式
+- 请使用 Google 风格的 Docstring
 
-- gitの操作はgit statusでステータス確認しながら慎重に行ってください
-- git管理されているファイルは、git mv や git rm を使って移動削除してください
+### 测试代码
 
-### Pull Request(PR)
+- 请在 tests 目录下按照与 src 目录相同的结构创建测试代码
+- 创建测试代码后请运行 pytest 确认没有错误。如有错误请修正
 
-#### PR作成時
-- PRを要望されたら、gitコマンドで差分を確認したうえで、`gh pr` コマンドを使ってPRを作成してください
-- PRのdescriptionは .github/pull_request_template.md を読み取ってフォーマットを合わせてください
+### Git 操作
 
-#### PRレビュー時
-以下の手順でファイルごとにコメントを付けてください：
+- 请在 git 操作时通过 git status 确认状态，谨慎操作
+- git 管理的文件请使用 git mv 或 git rm 进行移动或删除
 
-1. チェックする観点は .github/pull_request_template.md を参照してください
-2. PRの差分を確認:
+### Pull Request (PR)
+
+#### 创建 PR 时
+- 当被要求创建 PR 时，请先用 git 命令确认差异，然后使用 `gh pr` 命令创建 PR
+- PR 的 description 请参考 .github/pull_request_template.md 的格式
+
+#### PR 审查时
+请按以下步骤为每个文件添加评论：
+
+1. 检查要点请参考 .github/pull_request_template.md
+2. 确认 PR 差异：
    ```bash
-   gh pr diff <PR番号>
+   gh pr diff <PR号>
    ```
 
-3. ファイルごとに、変更後のファイル全体とPRの差分を確認した上でレビューコメントを追加:
+3. 在确认每个文件的完整内容和 PR 差异后，添加审查评论：
    ```bash
-   gh api repos/<owner>/<repo>/pulls/<PR番号>/comments \
-     -F body="レビューコメント" \
-     -F commit_id="$(gh pr view <PR番号> --json headRefOid --jq .headRefOid)" \
-     -F path="対象ファイルのパス" \
-     -F position=<diffの行番号>
+   gh api repos/<owner>/<repo>/pulls/<PR号>/comments \
+     -F body="审查评论" \
+     -F commit_id="$(gh pr view <PR号> --json headRefOid --jq .headRefOid)" \
+     -F path="目标文件路径" \
+     -F position=<diff行号>
    ```
 
-   パラメータの説明：
-   - position: diffの行番号（新規ファイルの場合は1から開始）
-   - commit_id: PRの最新のコミットIDを自動取得
+   参数说明：
+   - position: diff 的行号（新文件从 1 开始）
+   - commit_id: 自动获取 PR 的最新 commit ID

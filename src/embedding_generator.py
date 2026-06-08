@@ -1,7 +1,7 @@
 """
-エンベディング生成モジュール
+嵌入向量生成模块
 
-テキストからエンベディングを生成します。
+从文本生成嵌入向量。
 """
 
 import logging
@@ -10,12 +10,12 @@ from typing import List
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 
-# .envの読み込み
+# 加载 .env
 load_dotenv()
 
 
 class _LocalBackend:
-    """sentence-transformers を使用したローカル推論バックエンド"""
+    """使用 sentence-transformers 的本地推理后端"""
 
     def __init__(self, model_name: str, logger: logging.Logger):
         try:
@@ -38,7 +38,7 @@ class _LocalBackend:
 
 
 class _OpenAIBackend:
-    """OpenAI 互換 API を使用したバックエンド"""
+    """使用 OpenAI 兼容 API 的后端"""
 
     def __init__(self, model_name: str, logger: logging.Logger):
         try:
@@ -101,23 +101,23 @@ class _OpenAIBackend:
 
 class EmbeddingGenerator:
     """
-    エンベディング生成クラス
+    嵌入向量生成类
 
-    テキストからエンベディングを生成します。
+    从文本生成嵌入向量。
 
     Attributes:
-        model_name: モデル名
-        prefix_query: クエリ用プレフィックス
-        prefix_embedding: エンベディング用プレフィックス
-        logger: ロガー
+        model_name: 模型名称
+        prefix_query: 查询用前缀
+        prefix_embedding: 嵌入向量用前缀
+        logger: 日志记录器
     """
 
     def __init__(self, model_name: str = None):
         """
-        EmbeddingGeneratorのコンストラクタ
+        EmbeddingGenerator 的构造函数
 
         Args:
-            model_name: 使用するモデル名（.env優先）
+            model_name: 使用的模型名称（.env 优先）
         """
         self.model_name = os.getenv("EMBEDDING_MODEL") or model_name or "intfloat/multilingual-e5-large"
         self.prefix_query = os.getenv("EMBEDDING_PREFIX_QUERY", "")
@@ -133,15 +133,15 @@ class EmbeddingGenerator:
                 f"EMBEDDING_PROVIDER must be 'local' or 'openai', got: {provider!r}"
             )
 
-        self.logger.info(f"プロバイダ '{provider}' でモデル '{self.model_name}' を初期化しています...")
+        self.logger.info(f"正在使用提供者 '{provider}' 初始化模型 '{self.model_name}'...")
         try:
             if provider == "local":
                 self._backend = _LocalBackend(self.model_name, self.logger)
             else:
                 self._backend = _OpenAIBackend(self.model_name, self.logger)
-            self.logger.info(f"モデル '{self.model_name}' を読み込みました")
+            self.logger.info(f"已加载模型 '{self.model_name}'")
         except Exception as e:
-            self.logger.error(f"モデル '{self.model_name}' の読み込みに失敗しました: {str(e)}")
+            self.logger.error(f"加载模型 '{self.model_name}' 失败：{str(e)}")
             raise
 
     def _validate_dim(self, embedding: List[float], context: str):
@@ -155,14 +155,14 @@ class EmbeddingGenerator:
 
     def _add_prefix(self, text: str, prefix: str) -> str:
         """
-        テキストに適切なプレフィックスを追加する
+        为文本添加适当的前缀
 
         Args:
-            text: 元のテキスト
-            prefix: 追加するプレフィックス
+            text: 原始文本
+            prefix: 要添加的前缀
 
         Returns:
-            プレフィックス付きのテキスト
+            带前缀的文本
         """
         if not prefix:
             return text
@@ -174,40 +174,40 @@ class EmbeddingGenerator:
 
     def generate_embedding(self, text: str) -> List[float]:
         """
-        テキストからエンベディングを生成します。
+        从文本生成嵌入向量。
 
         Args:
-            text: エンベディングを生成するテキスト
+            text: 要生成嵌入向量的文本
 
         Returns:
-            エンベディング（浮動小数点数のリスト）
+            嵌入向量（浮点数列表）
         """
         if not text:
-            self.logger.warning("空のテキストからエンベディングを生成しようとしています")
+            self.logger.warning("尝试从空文本生成嵌入向量")
             return []
 
         try:
             processed_text = self._add_prefix(text, self.prefix_embedding)
             embedding = self._backend.encode_one(processed_text)
             self._validate_dim(embedding, "generate_embedding")
-            self.logger.debug(f"テキスト '{text[:50]}...' のエンベディングを生成しました")
+            self.logger.debug(f"已生成文本 '{text[:50]}...' 的嵌入向量")
             return embedding
         except Exception as e:
-            self.logger.error(f"エンベディングの生成中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"生成嵌入向量时发生错误：{str(e)}")
             raise
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
-        複数のテキストからエンベディングを生成します。
+        从多个文本生成嵌入向量。
 
         Args:
-            texts: エンベディングを生成するテキストのリスト
+            texts: 要生成嵌入向量的文本列表
 
         Returns:
-            エンベディングのリスト
+            嵌入向量列表
         """
         if not texts:
-            self.logger.warning("空のテキストリストからエンベディングを生成しようとしています")
+            self.logger.warning("尝试从空文本列表生成嵌入向量")
             return []
 
         try:
@@ -215,32 +215,32 @@ class EmbeddingGenerator:
             embeddings = self._backend.encode_batch(processed_texts)
             if embeddings:
                 self._validate_dim(embeddings[0], "generate_embeddings")
-            self.logger.info(f"{len(texts)} 個のテキストのエンベディングを生成しました")
+            self.logger.info(f"已生成 {len(texts)} 个文本的嵌入向量")
             return embeddings
         except Exception as e:
-            self.logger.error(f"エンベディングの生成中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"生成嵌入向量时发生错误：{str(e)}")
             raise
 
     def generate_search_embedding(self, query: str) -> List[float]:
         """
-        検索クエリからエンベディングを生成します。
+        从搜索查询生成嵌入向量。
 
         Args:
-            query: 検索クエリ
+            query: 搜索查询
 
         Returns:
-            エンベディング（浮動小数点数のリスト）
+            嵌入向量（浮点数列表）
         """
         if not query:
-            self.logger.warning("空のクエリからエンベディングを生成しようとしています")
+            self.logger.warning("尝试从空查询生成嵌入向量")
             return []
 
         try:
             processed_query = self._add_prefix(query, self.prefix_query)
             embedding = self._backend.encode_one(processed_query)
             self._validate_dim(embedding, "generate_search_embedding")
-            self.logger.debug(f"クエリ '{query}' のエンベディングを生成しました")
+            self.logger.debug(f"已生成查询 '{query}' 的嵌入向量")
             return embedding
         except Exception as e:
-            self.logger.error(f"クエリエンベディングの生成中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"生成查询嵌入向量时发生错误：{str(e)}")
             raise
