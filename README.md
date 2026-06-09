@@ -98,6 +98,54 @@ EMBEDDING_PREFIX_QUERY="query: "
 EMBEDDING_PREFIX_EMBEDDING="passage: "
 ```
 
+## Docker 部署
+
+仓库提供两个 Dockerfile 和一个开发用 `docker-compose.yml`：
+
+| 文件 | 用途 | 镜像大小 |
+|---|---|---|
+| `Dockerfile` | 本地模型版（含 sentence-transformers / torch）| ~3 GB |
+| `Dockerfile.openai` | OpenAI 兼容 API 版（裁剪重型依赖）| ~300 MB |
+| `docker-compose.yml` | 开发环境（pgvector DB + 通过 profile 选择 app）| — |
+
+### 快速开始
+
+```bash
+# 1. 从模板创建 .env（POSTGRES_HOST 等已预设为 compose 服务名）
+cp .env.docker .env
+# 按需编辑 EMBEDDING_* / RERANKER_* 配置
+
+# 2. 启动（本地模型版）
+docker compose --profile local up --build -d
+
+# 或启动（OpenAI API 版）
+docker compose --profile openai up --build -d
+```
+
+启动后 SSE 端点映射到宿主机 `8899:8000`。源码目录 `./src` 挂载进容器，修改代码无需重建镜像。
+
+### 索引与检索
+
+```bash
+# 在容器内执行索引
+docker compose --profile openai exec app-openai uv run python -m src.cli index
+
+# 文档数量
+docker compose --profile openai exec app-openai uv run python -m src.cli count
+```
+
+文档放入 `docker_runtime/data/source/`（root 权限，用 `docker cp` 写入）或挂载到其他路径。
+
+### 直接构建镜像
+
+不使用 compose 时，可直接构建：
+
+```bash
+docker build -t mcp-rag-server:local .
+docker build -f Dockerfile.openai -t mcp-rag-server:openai .
+docker run --rm -p 8000:8000 --env-file .env mcp-rag-server:openai
+```
+
 ## 嵌入模型设置
 
 本服务器可以通过环境变量选择嵌入模型和提供者。
@@ -208,6 +256,42 @@ python -m src.cli index
 ```
 ValueError: Embedding dimension mismatch (generate_embedding): got 1536, expected EMBEDDING_DIM=1024.
 Run `python -m src.cli clear` then re-index after updating EMBEDDING_DIM.
+```
+
+
+## 重排序（Reranker）
+
+可选的两阶段检索精排功能。开启后，会先用向量检索召回 `limit × RERANK_FACTOR` 个候选，再用 CrossEncoder 对 (query, passage) 对打分并按相关性重排。
+
+### 环境变量
+
+| 变量名 | 默认值 | 说明 |
+|--------|-----------|------|
+| `RERANKER_PROVIDER` | `none` | `none`（禁用）/ `local`（本地 CrossEncoder）/ `openai`（兼容 rerank API）|
+| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 模型名称 |
+| `RERANK_FACTOR` | `3` | 候选取样倍数（先召回 limit × factor 个候选再精排）|
+| `RERANKER_BASE_URL` | *(无)* | OpenAI 模式必填，如 `https://api.siliconflow.cn/v1` |
+| `RERANKER_API_KEY` | *(无)* | OpenAI 模式 API 密钥（部分自托管服务可省略）|
+
+### 提供者：local
+
+使用 `sentence-transformers` 的 CrossEncoder，首次启动会下载模型。
+
+```env
+RERANKER_PROVIDER=local
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANK_FACTOR=3
+```
+
+### 提供者：openai
+
+调用 OpenAI 兼容的 `/v1/rerank` 端点，适配 Jina / Cohere / SiliconFlow / Xinference 等服务。需要 `httpx`（已随 `openai` extra 安装）。
+
+```env
+RERANKER_PROVIDER=openai
+RERANKER_BASE_URL=https://api.siliconflow.cn/v1
+RERANKER_API_KEY=sk-...
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 ```
 
 

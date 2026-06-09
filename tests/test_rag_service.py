@@ -4,7 +4,7 @@ RAG 服务模块的单元测试（含重排序逻辑）
 
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -93,7 +93,7 @@ class TestSearchWithReranker:
         assert len(result) == 5
 
     def test_reranker_order_preserved_with_context(self):
-        """with_context=True 时合并相邻块后仍按 _rerank_order 排列。"""
+        """with_context=True 时合并相邻块后按文件路径和分块索引排序（reranker 控制 order）。"""
         dp, eg, vd = _mock_rag_components()
         eg.generate_search_embedding.return_value = [0.1] * 128
 
@@ -118,11 +118,12 @@ class TestSearchWithReranker:
         svc = RAGService(dp, eg, vd, reranker=mock_reranker, rerank_factor=3)
         result = svc.search("test query", limit=2, with_context=True, context_size=1)
 
-        # _rerank_order 应为 0, 1（与 reranker 返回顺序一致）
-        assert result[0]["_rerank_order"] == 0
-        assert result[1]["_rerank_order"] == 1
+        # _rerank_order 已被清理，验证排列顺序：b.txt (rerank_order=0) 在前
         assert result[0]["file_path"] == "b.txt"
         assert result[1]["file_path"] == "a.txt"
+        # 结果中不应包含 _rerank_order
+        for r in result:
+            assert "_rerank_order" not in r
 
     def test_fetch_limit_capped_at_max(self):
         """limit=100, factor=10 → fetch_limit 被限制为 _MAX_FETCH_LIMIT (200)。"""
@@ -137,7 +138,7 @@ class TestSearchWithReranker:
         mock_reranker.rerank.return_value = reranked
 
         svc = RAGService(dp, eg, vd, reranker=mock_reranker, rerank_factor=10)
-        result = svc.search("test query", limit=100)
+        svc.search("test query", limit=100)
 
         vd.search.assert_called_once_with([0.1] * 128, _MAX_FETCH_LIMIT)
 
@@ -160,7 +161,7 @@ class TestSearchWithReranker:
         assert svc.rerank_factor == 10
 
     def test_same_file_multiple_hits_context_ordering(self):
-        """同一文件多个命中点时，上下文分块按各自父命中的 _rerank_order 排列。"""
+        """同一文件多个命中点时，上下文分块按各自父命中的排列顺序分组。"""
         dp, eg, vd = _mock_rag_components()
         eg.generate_search_embedding.return_value = [0.1] * 128
 
@@ -185,14 +186,16 @@ class TestSearchWithReranker:
                 idx = ci + offset
                 if idx == ci:
                     continue
-                chunks.append({
-                    "document_id": f"adj_{fp}_{idx}",
-                    "content": f"adj {fp} {idx}",
-                    "file_path": fp,
-                    "chunk_index": idx,
-                    "similarity": 0.5,
-                    "metadata": {},
-                })
+                chunks.append(
+                    {
+                        "document_id": f"adj_{fp}_{idx}",
+                        "content": f"adj {fp} {idx}",
+                        "file_path": fp,
+                        "chunk_index": idx,
+                        "similarity": 0.5,
+                        "metadata": {},
+                    }
+                )
             return chunks
 
         vd.get_adjacent_chunks.side_effect = _adjacent
@@ -200,21 +203,14 @@ class TestSearchWithReranker:
         svc = RAGService(dp, eg, vd, reranker=mock_reranker, rerank_factor=3)
         result = svc.search("test query", limit=3, with_context=True, context_size=1)
 
-        # 找出所有 _rerank_order
-        orders = [(r.get("_rerank_order", 999), r["file_path"], r["chunk_index"]) for r in result]
-
-        # 同一 file_a 的上下文分块应按各自父命中的 order 分组
-        # hit_a (order=0) 的上下文 chunk4, chunk6 应在 hit_c (order=2) 的 chunk9, chunk11 之前
-        order_a_5_ctx = [o for o in orders if o[1] == "a.txt" and o[2] in (4, 5, 6)]
-        order_a_10_ctx = [o for o in orders if o[1] == "a.txt" and o[2] in (9, 10, 11)]
-
-        # 所有 hit_a 的上下文分块应继承 order=0
-        assert all(o[0] == 0 for o in order_a_5_ctx), f"Expected order=0, got {order_a_5_ctx}"
-        # 所有 hit_c 的上下文分块应继承 order=2
-        assert all(o[0] == 2 for o in order_a_10_ctx), f"Expected order=2, got {order_a_10_ctx}"
+        # 验证排列顺序：hit_a (order=0) 的上下文在 hit_c (order=2) 之前
+        # _rerank_order 已被清理，验证排列结果
+        hit_a_indices = [i for i, r in enumerate(result) if r["file_path"] == "a.txt" and r["chunk_index"] in (4, 5, 6)]
+        hit_c_indices = [i for i, r in enumerate(result) if r["file_path"] == "a.txt" and r["chunk_index"] in (9, 10, 11)]
+        assert all(i < hit_c_indices[0] for i in hit_a_indices)
 
     def test_overlapping_context_keeps_best_parent_order(self):
-        """重叠上下文窗口中，共享分块应继承最优（最小）的 _rerank_order。"""
+        """重叠上下文窗口中，共享分块应继承最优的排列顺序。"""
         dp, eg, vd = _mock_rag_components()
         eg.generate_search_embedding.return_value = [0.1] * 128
 
@@ -237,14 +233,16 @@ class TestSearchWithReranker:
                 idx = ci + offset
                 if idx == ci:
                     continue
-                chunks.append({
-                    "document_id": f"adj_{idx}",
-                    "content": f"adj {idx}",
-                    "file_path": fp,
-                    "chunk_index": idx,
-                    "similarity": 0.5,
-                    "metadata": {},
-                })
+                chunks.append(
+                    {
+                        "document_id": f"adj_{idx}",
+                        "content": f"adj {idx}",
+                        "file_path": fp,
+                        "chunk_index": idx,
+                        "similarity": 0.5,
+                        "metadata": {},
+                    }
+                )
             return chunks
 
         vd.get_adjacent_chunks.side_effect = _adjacent
@@ -252,13 +250,112 @@ class TestSearchWithReranker:
         svc = RAGService(dp, eg, vd, reranker=mock_reranker, rerank_factor=3)
         result = svc.search("test query", limit=2, with_context=True, context_size=2)
 
-        by_doc_id = {r["document_id"]: r for r in result}
+        # _rerank_order 已被清理，验证 adj_4 排在 hit_3 (order=0) 的分组中
+        # 即 adj_4 的位置应在 hit_3 和 hit_5 之间，在 hit_5 分组的上下文之前
+        adj_4_idx = next(i for i, r in enumerate(result) if r["document_id"] == "adj_4")
+        hit_5_idx = next(i for i, r in enumerate(result) if r["document_id"] == "id_5")
+        # adj_4 应与 hit_3 同组（order=0），因此在 hit_5 之前
+        assert adj_4_idx < hit_5_idx
 
-        # 命中分块保持自己的 _rerank_order
-        assert by_doc_id["id_3"]["_rerank_order"] == 0
-        assert by_doc_id["id_5"]["_rerank_order"] == 1
 
-        # chunk4 在两个窗口的重叠区（adj_4 被 hit_3 和 hit_5 的上下文都覆盖）
-        # adj_4 先被 hit_3 (order=0) 注册，再被 hit_5 (order=1) 尝试覆盖
-        # 因 1 > 0，不覆盖，应保留 order=0（最优）
-        assert by_doc_id["adj_4"]["_rerank_order"] == 0, f"Expected 0, got {by_doc_id['adj_4']['_rerank_order']}"
+class TestLimitValidation:
+    """limit 参数校验测试。"""
+
+    def test_negative_limit_raises(self):
+        """limit < 0 时抛出 ValueError。"""
+        dp, eg, vd = _mock_rag_components()
+        svc = RAGService(dp, eg, vd)
+        with pytest.raises(ValueError, match="limit 必须大于 0"):
+            svc.search("test", limit=-1)
+
+    def test_zero_limit_raises(self):
+        """limit = 0 时抛出 ValueError。"""
+        dp, eg, vd = _mock_rag_components()
+        svc = RAGService(dp, eg, vd)
+        with pytest.raises(ValueError, match="limit 必须大于 0"):
+            svc.search("test", limit=0)
+
+
+class TestRerankerFactoryFailure:
+    """工厂函数异常降级测试。"""
+
+    def test_reranker_factory_failure_degrades_gracefully(self):
+        """工厂函数抛异常时降级为无重排序模式。"""
+        dp, eg, vd = _mock_rag_components()
+        eg.generate_search_embedding.return_value = [0.1] * 128
+        vd.search.return_value = _make_results(5)
+
+        svc = RAGService(dp, eg, vd)
+        svc.set_reranker_factory(lambda: (_ for _ in ()).throw(RuntimeError("model load failed")))
+
+        # 不应抛异常，应降级为无重排序
+        result = svc.search("test query", limit=5)
+        assert len(result) == 5
+        vd.search.assert_called_once_with([0.1] * 128, 5)
+
+    def test_reranker_factory_no_retry_storm(self):
+        """工厂失败后不再重试。"""
+        dp, eg, vd = _mock_rag_components()
+        eg.generate_search_embedding.return_value = [0.1] * 128
+        vd.search.return_value = _make_results(5)
+
+        call_count = 0
+
+        def bad_factory():
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("fail")
+
+        svc = RAGService(dp, eg, vd)
+        svc.set_reranker_factory(bad_factory)
+
+        svc.search("test", limit=5)
+        svc.search("test", limit=5)
+
+        assert call_count == 1
+
+
+class TestFullDocumentParentOrder:
+    """全文文档父级 order 最小值测试。"""
+
+    def test_full_document_parent_order_keeps_minimum(self):
+        """同一文件不同命中点的全文分块继承最小的 _rerank_order（最优父级）。"""
+        dp, eg, vd = _mock_rag_components()
+        eg.generate_search_embedding.return_value = [0.1] * 128
+
+        # 两个文件各一个命中，验证 full_document 合并后保持排列顺序
+        hit_a = {"document_id": "id_a", "content": "a", "file_path": "a.txt", "chunk_index": 2, "similarity": 0.9}
+        hit_b = {"document_id": "id_b", "content": "b", "file_path": "b.txt", "chunk_index": 1, "similarity": 0.7}
+
+        reranked = [
+            {**hit_b, "rerank_score": 0.95},  # order=0 — b.txt 优先
+            {**hit_a, "rerank_score": 0.75},  # order=1 — a.txt 次之
+        ]
+        mock_reranker = MagicMock()
+        mock_reranker.rerank.return_value = reranked
+        vd.search.return_value = [hit_a, hit_b]
+
+        def _full_doc(fp):
+            return [
+                {
+                    "document_id": f"full_{fp}_{i}",
+                    "content": f"full {fp} {i}",
+                    "file_path": fp,
+                    "chunk_index": i,
+                    "similarity": 0.3,
+                    "metadata": {},
+                }
+                for i in range(3)
+            ]
+
+        vd.get_document_by_file_path.side_effect = _full_doc
+
+        svc = RAGService(dp, eg, vd, reranker=mock_reranker, rerank_factor=3)
+        result = svc.search("test query", limit=2, full_document=True)
+
+        # _rerank_order 已被清理
+        assert all("_rerank_order" not in r for r in result)
+        # b.txt (order=0) 的所有分块应在 a.txt (order=1) 之前
+        b_indices = [i for i, r in enumerate(result) if r["file_path"] == "b.txt"]
+        a_indices = [i for i, r in enumerate(result) if r["file_path"] == "a.txt"]
+        assert max(b_indices) < min(a_indices)

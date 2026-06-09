@@ -66,9 +66,13 @@ def _legacy_item_to_sdk(item) -> mcp_types.TextContent | mcp_types.ImageContent 
     if item_type == "resource":
         resource = item.get("resource", {})
         if "blob" in resource:
-            res_contents = mcp_types.BlobResourceContents(uri=resource.get("uri", ""), blob=resource["blob"], mimeType=resource.get("mimeType"))
+            res_contents = mcp_types.BlobResourceContents(
+                uri=resource.get("uri", ""), blob=resource["blob"], mimeType=resource.get("mimeType")
+            )
         else:
-            res_contents = mcp_types.TextResourceContents(uri=resource.get("uri", ""), text=resource.get("text", ""), mimeType=resource.get("mimeType"))
+            res_contents = mcp_types.TextResourceContents(
+                uri=resource.get("uri", ""), text=resource.get("text", ""), mimeType=resource.get("mimeType")
+            )
         return mcp_types.EmbeddedResource(type="resource", resource=res_contents)
     # unknown type — preserve as text
     return mcp_types.TextContent(type="text", text=str(item))
@@ -82,11 +86,7 @@ def _legacy_result_to_content(result) -> list:
     """
     if isinstance(result, dict) and "content" in result:
         if result.get("isError"):
-            text_parts = [
-                item.get("text", str(item))
-                for item in result["content"]
-                if isinstance(item, dict)
-            ]
+            text_parts = [item.get("text", str(item)) for item in result["content"] if isinstance(item, dict)]
             raise RuntimeError(" ".join(text_parts))
         return [_legacy_item_to_sdk(item) for item in result["content"]]
     return [mcp_types.TextContent(type="text", text=str(result))]
@@ -107,8 +107,10 @@ def _adapt_legacy_tools(shim, registry: ToolRegistry) -> None:
                 def _run():
                     with tool_execution_lock:
                         return fn(arguments)
+
                 result = await anyio.to_thread.run_sync(_run)
                 return _legacy_result_to_content(result)
+
             return _handler
 
         registry.register(tool, _make_async_handler(handler_fn))
@@ -139,6 +141,7 @@ def create_sdk_server(
             extra_module.register_tools_sdk(registry)
         elif hasattr(extra_module, "register_tools"):
             from .mcp_server import MCPServer
+
             shim = MCPServer()
             extra_module.register_tools(shim)
             _adapt_legacy_tools(shim, registry)
@@ -153,6 +156,7 @@ def create_sdk_server(
 async def run_stdio(server: LowLevelServer) -> None:
     """以 stdio 传输方式运行 SDK 服务器。"""
     from mcp.server.stdio import stdio_server
+
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
@@ -172,9 +176,7 @@ def create_sse_app(server: LowLevelServer):
     sse_transport = SseServerTransport("/messages/")
 
     async def handle_sse(request: Request):
-        async with sse_transport.connect_sse(
-            request.scope, request.receive, request._send
-        ) as (read_stream, write_stream):
+        async with sse_transport.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
             await server.run(read_stream, write_stream, server.create_initialization_options())
 
     async def handle_messages(request: Request):
@@ -191,5 +193,6 @@ def create_sse_app(server: LowLevelServer):
 def run_sse(server: LowLevelServer, host: str, port: int) -> None:
     """以 SSE 传输方式运行 SDK 服务器。"""
     import uvicorn
+
     app = create_sse_app(server)
     uvicorn.run(app, host=host, port=port)

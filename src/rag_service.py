@@ -16,6 +16,7 @@ from .reranker import Reranker
 
 _MAX_FETCH_LIMIT = 200
 _MAX_RERANK_FACTOR = 10
+_RERANK_ORDER_UNRANKED = 999
 
 
 class RAGService:
@@ -61,24 +62,24 @@ class RAGService:
         self._reranker_factory = None
         self.rerank_factor = max(1, min(int(rerank_factor), _MAX_RERANK_FACTOR))
 
+        # 初始化数据库
+        self.vector_database.initialize_database()
+
     @property
     def reranker(self):
         """延迟初始化重排序器，仅在首次访问时调用 factory。"""
         if self._reranker is None and self._reranker_factory is not None:
-            self._reranker = self._reranker_factory()
-            self._reranker_factory = None
+            factory = self._reranker_factory
+            self._reranker_factory = None  # 先清空，防止重试风暴
+            try:
+                self._reranker = factory()
+            except Exception as e:
+                self.logger.error(f"重排序器初始化失败，将降级为无重排序模式：{e}")
         return self._reranker
 
     def set_reranker_factory(self, factory):
         """设置重排序器延迟工厂函数，首次搜索时才实例化。"""
         self._reranker_factory = factory
-
-        # 初始化数据库
-        try:
-            self.vector_database.initialize_database()
-        except Exception as e:
-            self.logger.error(f"数据库初始化失败：{str(e)}")
-            raise
 
     def index_documents(
         self,
@@ -176,6 +177,55 @@ class RAGService:
 
             return {"document_count": document_count, "processing_time": processing_time, "success": False, "error": str(e)}
 
+    def _merge_full_document_results(self, base_results: List[Dict]) -> List[Dict]:
+        """将全文分块合并到基础结果中，传播 _rerank_order 并保留最小 order 值。"""
+        full_doc_results = []
+        full_doc_parent_order = {}
+        processed_files = set()
+
+        for result in base_results:
+            file_path = result["file_path"]
+            if file_path in processed_files:
+                continue
+            processed_files.add(file_path)
+
+            parent_order = result.get("_rerank_order")
+            full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
+            for chunk in full_doc_chunks:
+                doc_id = chunk["document_id"]
+                existing_order = full_doc_parent_order.get(doc_id)
+                if existing_order is None or (parent_order is not None and parent_order < existing_order):
+                    full_doc_parent_order[doc_id] = parent_order
+            full_doc_results.extend(full_doc_chunks)
+
+        merged_results = base_results.copy()
+        existing_doc_ids = {result["document_id"] for result in merged_results}
+
+        for doc_chunk in full_doc_results:
+            if doc_chunk["document_id"] not in existing_doc_ids:
+                parent_order = full_doc_parent_order.get(doc_chunk["document_id"])
+                if parent_order is not None:
+                    doc_chunk["_rerank_order"] = parent_order
+                merged_results.append(doc_chunk)
+                existing_doc_ids.add(doc_chunk["document_id"])
+
+        if self.reranker:
+            merged_results.sort(
+                key=lambda x: (x.get("_rerank_order", _RERANK_ORDER_UNRANKED), x["file_path"], x["chunk_index"])
+            )
+        else:
+            merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
+
+        self.logger.info(f"检索结果（含全文）：{len(merged_results)} 条")
+        return merged_results
+
+    @staticmethod
+    def _clean_rerank_metadata(results: List[Dict]) -> List[Dict]:
+        """从结果中移除内部 _rerank_order 字段（rerank_score 是公共字段，保留）。"""
+        for r in results:
+            r.pop("_rerank_order", None)
+        return results
+
     def search(
         self, query: str, limit: int = 5, with_context: bool = False, context_size: int = 1, full_document: bool = False
     ) -> List[Dict[str, Any]]:
@@ -200,6 +250,9 @@ class RAGService:
                 - is_full_document: 是否为全文文档（文档全文时为 True）
         """
         try:
+            if limit <= 0:
+                raise ValueError(f"limit 必须大于 0，当前值：{limit}")
+
             # 从查询生成嵌入向量
             self.logger.info(f"正在为查询 '{query}' 生成嵌入向量...")
             query_embedding = self.embedding_generator.generate_search_embedding(query)
@@ -207,9 +260,10 @@ class RAGService:
             # 向量检索
             self.logger.info(f"正在执行查询 '{query}' 的向量检索...")
             if self.reranker:
-                fetch_limit = max(limit, min(limit * self.rerank_factor, _MAX_FETCH_LIMIT))
+                fetch_limit = min(limit * self.rerank_factor, _MAX_FETCH_LIMIT)
                 initial_results = self.vector_database.search(query_embedding, fetch_limit)
-                results = self.reranker.rerank(query, initial_results, k=limit)
+                k = min(limit, len(initial_results))
+                results = self.reranker.rerank(query, initial_results, k=k)
                 for rank_idx, r in enumerate(results):
                     r["_rerank_order"] = rank_idx
             else:
@@ -260,7 +314,9 @@ class RAGService:
 
                 # 排序
                 if self.reranker:
-                    all_results.sort(key=lambda x: (x.get("_rerank_order", 999), x["file_path"], x["chunk_index"]))
+                    all_results.sort(
+                        key=lambda x: (x.get("_rerank_order", _RERANK_ORDER_UNRANKED), x["file_path"], x["chunk_index"])
+                    )
                 else:
                     all_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
 
@@ -268,104 +324,16 @@ class RAGService:
 
                 # 获取文档全文的情况
                 if full_document:
-                    full_doc_results = []
-                    # 全文分块 → 父命中分块的 _rerank_order 映射
-                    full_doc_parent_order = {}
-                    processed_files = set()  # 记录已处理的文件
-
-                    # 获取检索结果中包含的文件全文
-                    for result in all_results:
-                        file_path = result["file_path"]
-
-                        # 跳过已处理的文件
-                        if file_path in processed_files:
-                            continue
-
-                        processed_files.add(file_path)
-
-                        # 获取文件全文
-                        parent_order = result.get("_rerank_order")
-                        full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
-                        for chunk in full_doc_chunks:
-                            full_doc_parent_order[chunk["document_id"]] = parent_order
-                        full_doc_results.extend(full_doc_chunks)
-
-                    # 合并结果
-                    merged_results = all_results.copy()
-
-                    # 为避免重复，记录已包含的文档 ID
-                    existing_doc_ids = {result["document_id"] for result in merged_results}
-
-                    # 仅添加不重复的全文分块，并传播 _rerank_order
-                    for doc_chunk in full_doc_results:
-                        if doc_chunk["document_id"] not in existing_doc_ids:
-                            parent_order = full_doc_parent_order.get(doc_chunk["document_id"])
-                            if parent_order is not None:
-                                doc_chunk["_rerank_order"] = parent_order
-                            merged_results.append(doc_chunk)
-                            existing_doc_ids.add(doc_chunk["document_id"])
-
-                    # 排序
-                    if self.reranker:
-                        merged_results.sort(key=lambda x: (x.get("_rerank_order", 999), x["file_path"], x["chunk_index"]))
-                    else:
-                        merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
-
-                    self.logger.info(f"检索结果（含全文）：{len(merged_results)} 条")
-                    return merged_results
+                    return self._clean_rerank_metadata(self._merge_full_document_results(all_results))
                 else:
-                    return all_results
+                    return self._clean_rerank_metadata(all_results)
             else:
                 # 获取文档全文的情况
                 if full_document:
-                    full_doc_results = []
-                    # 全文分块 → 父命中分块的 _rerank_order 映射
-                    full_doc_parent_order = {}
-                    processed_files = set()  # 记录已处理的文件
-
-                    # 获取检索结果中包含的文件全文
-                    for result in results:
-                        file_path = result["file_path"]
-
-                        # 跳过已处理的文件
-                        if file_path in processed_files:
-                            continue
-
-                        processed_files.add(file_path)
-
-                        # 获取文件全文
-                        parent_order = result.get("_rerank_order")
-                        full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
-                        for chunk in full_doc_chunks:
-                            full_doc_parent_order[chunk["document_id"]] = parent_order
-                        full_doc_results.extend(full_doc_chunks)
-
-                    # 合并结果
-                    merged_results = results.copy()
-
-                    # 为避免重复，记录已包含的文档 ID
-                    existing_doc_ids = {result["document_id"] for result in merged_results}
-
-                    # 仅添加不重复的全文分块，并传播 _rerank_order
-                    for doc_chunk in full_doc_results:
-                        if doc_chunk["document_id"] not in existing_doc_ids:
-                            parent_order = full_doc_parent_order.get(doc_chunk["document_id"])
-                            if parent_order is not None:
-                                doc_chunk["_rerank_order"] = parent_order
-                            merged_results.append(doc_chunk)
-                            existing_doc_ids.add(doc_chunk["document_id"])
-
-                    # 排序
-                    if self.reranker:
-                        merged_results.sort(key=lambda x: (x.get("_rerank_order", 999), x["file_path"], x["chunk_index"]))
-                    else:
-                        merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
-
-                    self.logger.info(f"检索结果（含全文）：{len(merged_results)} 条")
-                    return merged_results
+                    return self._clean_rerank_metadata(self._merge_full_document_results(results))
                 else:
                     self.logger.info(f"检索结果：{len(results)} 条")
-                    return results
+                    return self._clean_rerank_metadata(results)
 
         except Exception as e:
             self.logger.error(f"检索过程中发生错误：{str(e)}")

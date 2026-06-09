@@ -45,8 +45,7 @@ class _OpenAIBackend:
             from openai import OpenAI
         except ImportError:
             raise ImportError(
-                "EMBEDDING_PROVIDER=openai requires 'openai' package. "
-                "Install with: pip install mcp-rag-server[openai]"
+                "EMBEDDING_PROVIDER=openai requires 'openai' package. Install with: pip install mcp-rag-server[openai]"
             )
 
         base_url = os.getenv("EMBEDDING_BASE_URL", "").strip() or None
@@ -56,8 +55,7 @@ class _OpenAIBackend:
             parsed = urlparse(base_url)
             if parsed.scheme not in ("http", "https") or not parsed.hostname:
                 raise ValueError(
-                    f"EMBEDDING_BASE_URL is malformed: {base_url!r}. "
-                    "Expected a full URL, e.g. 'http://localhost:9997/v1'."
+                    f"EMBEDDING_BASE_URL is malformed: {base_url!r}. Expected a full URL, e.g. 'http://localhost:9997/v1'."
                 )
 
         is_official = base_url is None or urlparse(base_url).hostname == "api.openai.com"
@@ -129,9 +127,7 @@ class EmbeddingGenerator:
 
         provider = os.getenv("EMBEDDING_PROVIDER", "local").lower()
         if provider not in ("local", "openai"):
-            raise ValueError(
-                f"EMBEDDING_PROVIDER must be 'local' or 'openai', got: {provider!r}"
-            )
+            raise ValueError(f"EMBEDDING_PROVIDER must be 'local' or 'openai', got: {provider!r}")
 
         self.logger.info(f"正在使用提供者 '{provider}' 初始化模型 '{self.model_name}'...")
         try:

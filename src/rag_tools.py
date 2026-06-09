@@ -4,6 +4,7 @@ RAG 工具模块
 提供用于注册到 MCP 服务器的 RAG 相关工具。
 """
 
+import logging
 import os
 
 from typing import TYPE_CHECKING, Dict, Any
@@ -161,17 +162,18 @@ def search_handler(params: Dict[str, Any], rag_service: RAGService) -> Dict[str,
 
         # 在各组内按分块索引排序
         for file_path in file_groups:
-            file_groups[file_path].sort(key=lambda x: (x.get("_rerank_order", 999), x["chunk_index"]))
+            file_groups[file_path].sort(key=lambda x: x["chunk_index"])
 
-        # 有重排序时按每组最优 _rerank_order 排列文件分组
-        has_rerank = any("_rerank_order" in r for r in results)
+        # 有重排序时按每组最优 rerank_score 降序排列文件分组
+        has_rerank = any("rerank_score" in r for r in results)
         if has_rerank:
             sorted_groups = sorted(
                 file_groups.items(),
-                key=lambda item: min(r.get("_rerank_order", 999) for r in item[1]),
+                key=lambda item: max(r.get("rerank_score", float("-inf")) for r in item[1]),
+                reverse=True,
             )
         else:
-            sorted_groups = file_groups.items()
+            sorted_groups = list(file_groups.items())
 
         # 格式化结果
         content_items = [
@@ -375,6 +377,7 @@ def create_rag_service_from_env() -> RAGService:
     try:
         rerank_factor = int(rerank_factor_str)
     except ValueError:
+        logging.getLogger("rag_tools").warning(f"RERANK_FACTOR 值 '{rerank_factor_str}' 无效，使用默认值 3")
         rerank_factor = 3
 
     rag_service = RAGService(

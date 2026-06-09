@@ -246,11 +246,7 @@ def index_documents(directory_path, chunk_size=500, chunk_overlap=100, increment
         )
     else:
         logger.error(f"索引化失败：{result.get('error', '未知错误')}")
-        print(
-            f"索引化失败\n"
-            f"- 错误：{result.get('error', '未知错误')}\n"
-            f"- 处理时间：{result['processing_time']:.2f} 秒"
-        )
+        print(f"索引化失败\n- 错误：{result.get('error', '未知错误')}\n- 处理时间：{result['processing_time']:.2f} 秒")
         sys.exit(1)
 
 
@@ -285,9 +281,7 @@ def main():
     解析命令行参数并执行相应的处理。
     """
     # 解析命令行参数
-    parser = argparse.ArgumentParser(
-        description="MCP RAG Server CLI - 用于清除索引和建立索引的命令行界面"
-    )
+    parser = argparse.ArgumentParser(description="MCP RAG Server CLI - 用于清除索引和建立索引的命令行界面")
     subparsers = parser.add_subparsers(dest="command", help="要执行的命令")
 
     # clear 命令

@@ -16,11 +16,13 @@ class TestLocalEmbeddingGenerator(unittest.TestCase):
         self.fake_st = MagicMock()
         self.fake_model = MagicMock()
         self.fake_st.SentenceTransformer.return_value = self.fake_model
+
         # encode(str) → 1D array; encode(list) → 2D array; side_effect handles both
         def _encode_side_effect(inp):
             if isinstance(inp, str):
                 return np.array([0.1, 0.2, 0.3])
             return np.array([[0.1, 0.2, 0.3]] * len(inp))
+
         self.fake_model.encode.side_effect = _encode_side_effect
         self._modules = patch.dict(sys.modules, {"sentence_transformers": self.fake_st})
         self._modules.start()
@@ -35,11 +37,13 @@ class TestLocalEmbeddingGenerator(unittest.TestCase):
         return env
 
     def test_initialization_with_env_variables(self):
-        test_env = self._make_env({
-            "EMBEDDING_MODEL": "test-model",
-            "EMBEDDING_PREFIX_QUERY": "query: ",
-            "EMBEDDING_PREFIX_EMBEDDING": "passage: ",
-        })
+        test_env = self._make_env(
+            {
+                "EMBEDDING_MODEL": "test-model",
+                "EMBEDDING_PREFIX_QUERY": "query: ",
+                "EMBEDDING_PREFIX_EMBEDDING": "passage: ",
+            }
+        )
         with patch.dict(os.environ, test_env, clear=True):
             generator = EmbeddingGenerator()
             self.assertEqual(generator.model_name, "test-model")
@@ -181,9 +185,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             result = generator.generate_embedding("hello world")
             self.assertEqual(result, [0.1, 0.2, 0.3])
             mock_client = fake.OpenAI.return_value
-            mock_client.embeddings.create.assert_called_once_with(
-                input=["hello world"], model="text-embedding-3-small"
-            )
+            mock_client.embeddings.create.assert_called_once_with(input=["hello world"], model="text-embedding-3-small")
 
     def test_openai_generate_embeddings_batches(self):
         """100 个文本 / batch_size=32 → create 被调用 4 次"""
@@ -194,9 +196,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
         def make_response(n):
             return MagicMock(data=[MagicMock(embedding=[0.1, 0.2, 0.3])] * n)
 
-        mock_client.embeddings.create.side_effect = [
-            make_response(32), make_response(32), make_response(32), make_response(4)
-        ]
+        mock_client.embeddings.create.side_effect = [make_response(32), make_response(32), make_response(32), make_response(4)]
 
         self._start_openai_mock(fake_openai)
         env = {
@@ -229,9 +229,7 @@ class TestOpenAIEmbeddingGenerator(unittest.TestCase):
             self.assertEqual(generator.prefix_embedding, "")
             generator.generate_embedding("hello")
             mock_client = fake.OpenAI.return_value
-            mock_client.embeddings.create.assert_called_once_with(
-                input=["hello"], model="text-embedding-3-small"
-            )
+            mock_client.embeddings.create.assert_called_once_with(input=["hello"], model="text-embedding-3-small")
 
     def test_openai_missing_package_raises_helpful_import_error(self):
         """未安装 openai 包 → 带安装指南的 ImportError"""

@@ -30,9 +30,7 @@ class _LiveServer:
 
     def __init__(self, app, port: int):
         self.port = port
-        self._server = uvicorn.Server(
-            uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-        )
+        self._server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
         self._thread = threading.Thread(target=self._server.run, daemon=True)
 
     def start(self, timeout: float = 5.0) -> None:
@@ -169,16 +167,20 @@ def test_sse_round_trip_tools_list(live_server):
     assert isinstance(endpoint_path, str), f"Expected endpoint URL: {endpoint_path}"
 
     # 1. initialize handshake
-    resp = _post_rpc(live_server.base_url, endpoint_path, {
-        "jsonrpc": "2.0",
-        "method": "initialize",
-        "id": 0,
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test-client", "version": "0.0.1"},
+    resp = _post_rpc(
+        live_server.base_url,
+        endpoint_path,
+        {
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "id": 0,
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "0.0.1"},
+            },
         },
-    })
+    )
     assert resp.status_code == 202
 
     init_msg = _json.loads(msg_q.get(timeout=10))
@@ -186,17 +188,25 @@ def test_sse_round_trip_tools_list(live_server):
     assert "result" in init_msg
 
     # 2. notifications/initialized (no response expected)
-    _post_rpc(live_server.base_url, endpoint_path, {
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-    })
+    _post_rpc(
+        live_server.base_url,
+        endpoint_path,
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+        },
+    )
 
     # 3. tools/list
-    resp = _post_rpc(live_server.base_url, endpoint_path, {
-        "jsonrpc": "2.0",
-        "method": "tools/list",
-        "id": 1,
-    })
+    resp = _post_rpc(
+        live_server.base_url,
+        endpoint_path,
+        {
+            "jsonrpc": "2.0",
+            "method": "tools/list",
+            "id": 1,
+        },
+    )
     assert resp.status_code == 202
 
     # Assert the JSON-RPC response arrives as a message event on the SSE stream

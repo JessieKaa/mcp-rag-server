@@ -479,9 +479,7 @@ class VectorDatabase:
             self.connection.commit()
 
             if count_before_delete > 0:
-                self.logger.info(
-                    f"数据库已清除（删除了 documents 表，目标文档数为 {count_before_delete} 个）"
-                )
+                self.logger.info(f"数据库已清除（删除了 documents 表，目标文档数为 {count_before_delete} 个）")
             else:
                 self.logger.info("数据库已清除（删除了 documents 表）")
             return count_before_delete
@@ -611,9 +609,7 @@ class VectorDatabase:
                     }
                 )
 
-            self.logger.info(
-                f"获取了文件 '{file_path}' 的分块 {chunk_index} 前后 {len(results)} 个分块"
-            )
+            self.logger.info(f"获取了文件 '{file_path}' 的分块 {chunk_index} 前后 {len(results)} 个分块")
             return results
 
         except Exception as e:

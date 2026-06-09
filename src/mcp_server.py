@@ -263,9 +263,7 @@ class MCPServer:
                     request_id,
                 )
         else:
-            self._send_result(
-                {"content": [{"type": "text", "text": f"未找到工具：{tool_name}"}], "isError": True}, request_id
-            )
+            self._send_result({"content": [{"type": "text", "text": f"未找到工具：{tool_name}"}], "isError": True}, request_id)
 
     def _handle_tools_list(self, request_id: Any):
         """

@@ -176,3 +176,6 @@ cython_debug/
 .DS_Store
 data/processed/file_registry.json
 data/processed/*.md
+
+# Docker runtime data (postgres, indexed docs, source mounts)
+docker_runtime/
