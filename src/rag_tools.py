@@ -15,6 +15,7 @@ from .document_processor import DocumentProcessor
 from .embedding_generator import EmbeddingGenerator
 from .vector_database import VectorDatabase
 from .rag_service import RAGService
+from .reranker import create_reranker_from_env
 
 from dotenv import load_dotenv
 
@@ -23,10 +24,12 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
+
 # 使用 server 模块中的统一执行锁，确保内置工具和旧版插件工具都经过同一串行化路径
 # 延迟导入避免循环依赖
 def _get_tool_lock():
     from .server import tool_execution_lock
+
     return tool_execution_lock
 
 
@@ -158,7 +161,17 @@ def search_handler(params: Dict[str, Any], rag_service: RAGService) -> Dict[str,
 
         # 在各组内按分块索引排序
         for file_path in file_groups:
-            file_groups[file_path].sort(key=lambda x: x["chunk_index"])
+            file_groups[file_path].sort(key=lambda x: (x.get("_rerank_order", 999), x["chunk_index"]))
+
+        # 有重排序时按每组最优 _rerank_order 排列文件分组
+        has_rerank = any("_rerank_order" in r for r in results)
+        if has_rerank:
+            sorted_groups = sorted(
+                file_groups.items(),
+                key=lambda item: min(r.get("_rerank_order", 999) for r in item[1]),
+            )
+        else:
+            sorted_groups = file_groups.items()
 
         # 格式化结果
         content_items = [
@@ -169,7 +182,7 @@ def search_handler(params: Dict[str, Any], rag_service: RAGService) -> Dict[str,
         ]
 
         # 按文件显示结果
-        for i, (file_path, group) in enumerate(file_groups.items()):
+        for i, (file_path, group) in enumerate(sorted_groups):
             file_name = os.path.basename(file_path)
 
             # 文件标题
@@ -182,9 +195,13 @@ def search_handler(params: Dict[str, Any], rag_service: RAGService) -> Dict[str,
 
             # 显示各个分块
             for j, result in enumerate(group):
-                similarity_percent = result.get("similarity", 0) * 100
                 is_context = result.get("is_context", False)
                 is_full_document = result.get("is_full_document", False)
+
+                if "rerank_score" in result:
+                    score_str = f"重排分数：{result['rerank_score']:.4f}"
+                else:
+                    score_str = f"相似度：{result.get('similarity', 0) * 100:.2f}%"
 
                 # 根据全文文档、上下文分块、检索命中分块改变显示
                 if is_full_document:
@@ -205,7 +222,7 @@ def search_handler(params: Dict[str, Any], rag_service: RAGService) -> Dict[str,
                     content_items.append(
                         {
                             "type": "text",
-                            "text": f"\n=== 检索命中（分块 {result['chunk_index']}, 相似度：{similarity_percent:.2f}%) ===\n{result['content']}",
+                            "text": f"\n=== 检索命中（分块 {result['chunk_index']}, {score_str}) ===\n{result['content']}",
                         }
                     )
 
@@ -263,11 +280,7 @@ def _sync_result_to_content(result: Dict[str, Any]) -> list:
     """将同步处理函数返回的字典转换为 SDK TextContent 列表，isError=True 时抛出 RuntimeError。"""
     if isinstance(result, dict) and "content" in result:
         if result.get("isError"):
-            text_parts = [
-                item.get("text", str(item))
-                for item in result["content"]
-                if isinstance(item, dict)
-            ]
+            text_parts = [item.get("text", str(item)) for item in result["content"] if isinstance(item, dict)]
             raise RuntimeError(" ".join(text_parts))
         return [
             mcp_types.TextContent(type="text", text=item.get("text", str(item)))
@@ -311,6 +324,7 @@ def register_rag_tools_sdk(registry: "ToolRegistry", rag_service: RAGService) ->
         def _run():
             with _get_tool_lock():
                 return search_handler(arguments, rag_service)
+
         result = await anyio.to_thread.run_sync(_run)
         return _sync_result_to_content(result)
 
@@ -318,6 +332,7 @@ def register_rag_tools_sdk(registry: "ToolRegistry", rag_service: RAGService) ->
         def _run():
             with _get_tool_lock():
                 return get_document_count_handler(arguments, rag_service)
+
         result = await anyio.to_thread.run_sync(_run)
         return _sync_result_to_content(result)
 
@@ -355,6 +370,21 @@ def create_rag_service_from_env() -> RAGService:
     )
 
     # 创建 RAG 服务
-    rag_service = RAGService(document_processor, embedding_generator, vector_database)
+    rerank_factor = 3
+    rerank_factor_str = os.environ.get("RERANK_FACTOR", "3")
+    try:
+        rerank_factor = int(rerank_factor_str)
+    except ValueError:
+        rerank_factor = 3
+
+    rag_service = RAGService(
+        document_processor,
+        embedding_generator,
+        vector_database,
+        rerank_factor=rerank_factor,
+    )
+
+    # 延迟初始化重排序器，仅在首次搜索时加载模型
+    rag_service.set_reranker_factory(create_reranker_from_env)
 
     return rag_service

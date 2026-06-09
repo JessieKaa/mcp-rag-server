@@ -7,11 +7,15 @@ RAG 服务模块
 import os
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .document_processor import DocumentProcessor
 from .embedding_generator import EmbeddingGenerator
 from .vector_database import VectorDatabase
+from .reranker import Reranker
+
+_MAX_FETCH_LIMIT = 200
+_MAX_RERANK_FACTOR = 10
 
 
 class RAGService:
@@ -28,7 +32,12 @@ class RAGService:
     """
 
     def __init__(
-        self, document_processor: DocumentProcessor, embedding_generator: EmbeddingGenerator, vector_database: VectorDatabase
+        self,
+        document_processor: DocumentProcessor,
+        embedding_generator: EmbeddingGenerator,
+        vector_database: VectorDatabase,
+        reranker: Optional[Reranker] = None,
+        rerank_factor: int = 3,
     ):
         """
         RAGService 的构造函数
@@ -37,6 +46,8 @@ class RAGService:
             document_processor: 文档处理类实例
             embedding_generator: 嵌入向量生成类实例
             vector_database: 向量数据库类实例
+            reranker: 重排序器实例（None 时禁用重排序）
+            rerank_factor: 候选集倍率（fetch_limit = min(limit × factor, 200)）
         """
         # 设置日志记录器
         self.logger = logging.getLogger("rag_service")
@@ -46,6 +57,21 @@ class RAGService:
         self.document_processor = document_processor
         self.embedding_generator = embedding_generator
         self.vector_database = vector_database
+        self._reranker = reranker
+        self._reranker_factory = None
+        self.rerank_factor = max(1, min(int(rerank_factor), _MAX_RERANK_FACTOR))
+
+    @property
+    def reranker(self):
+        """延迟初始化重排序器，仅在首次访问时调用 factory。"""
+        if self._reranker is None and self._reranker_factory is not None:
+            self._reranker = self._reranker_factory()
+            self._reranker_factory = None
+        return self._reranker
+
+    def set_reranker_factory(self, factory):
+        """设置重排序器延迟工厂函数，首次搜索时才实例化。"""
+        self._reranker_factory = factory
 
         # 初始化数据库
         try:
@@ -180,11 +206,20 @@ class RAGService:
 
             # 向量检索
             self.logger.info(f"正在执行查询 '{query}' 的向量检索...")
-            results = self.vector_database.search(query_embedding, limit)
+            if self.reranker:
+                fetch_limit = max(limit, min(limit * self.rerank_factor, _MAX_FETCH_LIMIT))
+                initial_results = self.vector_database.search(query_embedding, fetch_limit)
+                results = self.reranker.rerank(query, initial_results, k=limit)
+                for rank_idx, r in enumerate(results):
+                    r["_rerank_order"] = rank_idx
+            else:
+                results = self.vector_database.search(query_embedding, limit)
 
             # 获取前后分块的情况
             if with_context and context_size > 0:
                 context_results = []
+                # 上下文分块 → 父命中分块的 _rerank_order 映射
+                context_parent_order = {}
                 processed_files = set()  # 记录已处理的文件和分块组合
 
                 for result in results:
@@ -200,6 +235,12 @@ class RAGService:
 
                     # 获取前后分块
                     adjacent_chunks = self.vector_database.get_adjacent_chunks(file_path, chunk_index, context_size)
+                    parent_order = result.get("_rerank_order")
+                    for adj in adjacent_chunks:
+                        doc_id = adj["document_id"]
+                        existing_order = context_parent_order.get(doc_id)
+                        if existing_order is None or (parent_order is not None and parent_order < existing_order):
+                            context_parent_order[doc_id] = parent_order
                     context_results.extend(adjacent_chunks)
 
                 # 合并结果
@@ -208,20 +249,28 @@ class RAGService:
                 # 为避免重复，记录已包含的文档 ID
                 existing_doc_ids = {result["document_id"] for result in all_results}
 
-                # 仅添加不重复的上下文分块
+                # 仅添加不重复的上下文分块，并传播 _rerank_order
                 for context in context_results:
                     if context["document_id"] not in existing_doc_ids:
+                        parent_order = context_parent_order.get(context["document_id"])
+                        if parent_order is not None:
+                            context["_rerank_order"] = parent_order
                         all_results.append(context)
                         existing_doc_ids.add(context["document_id"])
 
-                # 按文件路径和分块索引排序
-                all_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
+                # 排序
+                if self.reranker:
+                    all_results.sort(key=lambda x: (x.get("_rerank_order", 999), x["file_path"], x["chunk_index"]))
+                else:
+                    all_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
 
                 self.logger.info(f"检索结果（含上下文）：{len(all_results)} 条")
 
                 # 获取文档全文的情况
                 if full_document:
                     full_doc_results = []
+                    # 全文分块 → 父命中分块的 _rerank_order 映射
+                    full_doc_parent_order = {}
                     processed_files = set()  # 记录已处理的文件
 
                     # 获取检索结果中包含的文件全文
@@ -235,7 +284,10 @@ class RAGService:
                         processed_files.add(file_path)
 
                         # 获取文件全文
+                        parent_order = result.get("_rerank_order")
                         full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
+                        for chunk in full_doc_chunks:
+                            full_doc_parent_order[chunk["document_id"]] = parent_order
                         full_doc_results.extend(full_doc_chunks)
 
                     # 合并结果
@@ -244,14 +296,20 @@ class RAGService:
                     # 为避免重复，记录已包含的文档 ID
                     existing_doc_ids = {result["document_id"] for result in merged_results}
 
-                    # 仅添加不重复的全文分块
+                    # 仅添加不重复的全文分块，并传播 _rerank_order
                     for doc_chunk in full_doc_results:
                         if doc_chunk["document_id"] not in existing_doc_ids:
+                            parent_order = full_doc_parent_order.get(doc_chunk["document_id"])
+                            if parent_order is not None:
+                                doc_chunk["_rerank_order"] = parent_order
                             merged_results.append(doc_chunk)
                             existing_doc_ids.add(doc_chunk["document_id"])
 
-                    # 按文件路径和分块索引排序
-                    merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
+                    # 排序
+                    if self.reranker:
+                        merged_results.sort(key=lambda x: (x.get("_rerank_order", 999), x["file_path"], x["chunk_index"]))
+                    else:
+                        merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
 
                     self.logger.info(f"检索结果（含全文）：{len(merged_results)} 条")
                     return merged_results
@@ -261,6 +319,8 @@ class RAGService:
                 # 获取文档全文的情况
                 if full_document:
                     full_doc_results = []
+                    # 全文分块 → 父命中分块的 _rerank_order 映射
+                    full_doc_parent_order = {}
                     processed_files = set()  # 记录已处理的文件
 
                     # 获取检索结果中包含的文件全文
@@ -274,7 +334,10 @@ class RAGService:
                         processed_files.add(file_path)
 
                         # 获取文件全文
+                        parent_order = result.get("_rerank_order")
                         full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
+                        for chunk in full_doc_chunks:
+                            full_doc_parent_order[chunk["document_id"]] = parent_order
                         full_doc_results.extend(full_doc_chunks)
 
                     # 合并结果
@@ -283,14 +346,20 @@ class RAGService:
                     # 为避免重复，记录已包含的文档 ID
                     existing_doc_ids = {result["document_id"] for result in merged_results}
 
-                    # 仅添加不重复的全文分块
+                    # 仅添加不重复的全文分块，并传播 _rerank_order
                     for doc_chunk in full_doc_results:
                         if doc_chunk["document_id"] not in existing_doc_ids:
+                            parent_order = full_doc_parent_order.get(doc_chunk["document_id"])
+                            if parent_order is not None:
+                                doc_chunk["_rerank_order"] = parent_order
                             merged_results.append(doc_chunk)
                             existing_doc_ids.add(doc_chunk["document_id"])
 
-                    # 按文件路径和分块索引排序
-                    merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
+                    # 排序
+                    if self.reranker:
+                        merged_results.sort(key=lambda x: (x.get("_rerank_order", 999), x["file_path"], x["chunk_index"]))
+                    else:
+                        merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
 
                     self.logger.info(f"检索结果（含全文）：{len(merged_results)} 条")
                     return merged_results
