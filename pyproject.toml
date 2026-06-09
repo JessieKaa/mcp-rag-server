@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mcp-rag-server"
 version = "0.1.0"
-description = "MCP RAG Server - Model Context Protocol (MCP)に準拠したRAG機能を持つPythonサーバー"
+description = "MCP RAG Server - 符合 Model Context Protocol (MCP) 标准的 RAG 功能 Python 服务器"
 authors = [
     {name = "MCP Server Team"}
 ]
@@ -23,16 +23,19 @@ dependencies = [
     "mcp[cli]",
     "python-dotenv",
     "psycopg2-binary",
-    "sentence-transformers",
     "markdown",
-    "numpy",
     "markitdown[all]",
+    "sentence-transformers",
+    "numpy",
     "sentencepiece>=0.2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+]
+openai = [
+    "openai>=1.0.0",
 ]
 
 [project.scripts]
@@ -44,3 +47,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["docker_runtime", ".venv", "data"]

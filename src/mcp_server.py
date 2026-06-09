@@ -1,8 +1,8 @@
 """
-MCPサーバーモジュール
+MCP 服务器模块
 
-Model Context Protocol (MCP)に準拠したサーバーを提供します。
-JSON-RPC over stdioを使用してクライアントからのリクエストを処理します。
+提供符合 Model Context Protocol (MCP) 标准的服务器。
+使用 JSON-RPC over stdio 处理来自客户端的请求。
 """
 
 import sys
@@ -14,48 +14,48 @@ from pathlib import Path
 
 class MCPServer:
     """
-    Model Context Protocol (MCP)に準拠したサーバークラス
+    符合 Model Context Protocol (MCP) 标准的服务器类
 
-    JSON-RPC over stdioを使用してクライアントからのリクエストを処理します。
+    使用 JSON-RPC over stdio 处理来自客户端的请求。
 
     Attributes:
-        tools: 登録されたツールのディクショナリ
-        logger: ロガー
+        tools: 已注册工具的字典
+        logger: 日志记录器
     """
 
     def __init__(self):
         """
-        MCPServerのコンストラクタ
+        MCPServer 的构造函数
         """
         self.tools = {}
         self.tool_handlers = {}
 
-        # ロガーの設定
+        # 设置日志记录器
         self.logger = logging.getLogger("mcp_server")
         self.logger.setLevel(logging.INFO)
 
-        # ファイルハンドラの設定
+        # 设置文件处理器
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
         file_handler = logging.FileHandler(log_dir / "mcp_server.log")
         file_handler.setLevel(logging.INFO)
 
-        # フォーマッタの設定
+        # 设置格式化器
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
 
-        # ハンドラの追加
+        # 添加处理器
         self.logger.addHandler(file_handler)
 
     def register_tool(self, name: str, description: str, input_schema: Dict[str, Any], handler: Callable):
         """
-        ツールを登録します。
+        注册工具。
 
         Args:
-            name: ツール名
-            description: ツールの説明
-            input_schema: 入力スキーマ
-            handler: ツールのハンドラ関数
+            name: 工具名称
+            description: 工具描述
+            input_schema: 输入模式
+            handler: 工具处理函数
         """
         self.tools[name] = {
             "name": name,
@@ -63,55 +63,55 @@ class MCPServer:
             "inputSchema": input_schema,
         }
         self.tool_handlers[name] = handler
-        self.logger.info(f"ツール '{name}' を登録しました")
+        self.logger.info(f"已注册工具 '{name}'")
 
     def start(self, server_name: str = "mcp-server-python", version: str = "0.1.0", description: str = "Python MCP Server"):
         """
-        サーバーを起動し、stdioからのリクエストをリッスンします。
+        启动服务器并监听来自 stdio 的请求。
 
         Args:
-            server_name: サーバー名
-            version: バージョン
-            description: 説明
+            server_name: 服务器名称
+            version: 版本号
+            description: 描述
         """
-        self.logger.info(f"MCPサーバー '{server_name}' を起動しました")
+        self.logger.info(f"MCP 服务器 '{server_name}' 已启动")
 
-        # サーバー情報を保存（initializeリクエストで使用）
+        # 保存服务器信息（用于 initialize 请求）
         self.server_name = server_name
         self.server_version = version
         self.server_description = description
 
-        # リクエストをリッスン
+        # 监听请求
         while True:
             try:
-                # 標準入力からリクエストを読み込む
+                # 从标准输入读取请求
                 request_line = sys.stdin.readline()
                 if not request_line:
                     break
 
-                # リクエストをパース
+                # 解析请求
                 request = json.loads(request_line)
-                self.logger.info(f"リクエストを受信しました: {request}")
+                self.logger.info(f"收到请求：{request}")
 
-                # リクエストを処理
+                # 处理请求
                 self._handle_request(request)
 
             except json.JSONDecodeError:
-                self.logger.error("JSONのパースに失敗しました")
+                self.logger.error("JSON 解析失败")
                 self._send_error(-32700, "Parse error", None)
 
             except Exception as e:
-                self.logger.error(f"エラーが発生しました: {str(e)}")
+                self.logger.error(f"发生错误：{str(e)}")
                 self._send_error(-32603, f"Internal error: {str(e)}", None)
 
     def _handle_request(self, request: Dict[str, Any]):
         """
-        リクエストを処理します。
+        处理请求。
 
         Args:
-            request: JSONリクエスト
+            request: JSON 请求
         """
-        # リクエストのバリデーション
+        # 请求验证
         if "jsonrpc" not in request or request["jsonrpc"] != "2.0":
             self._send_error(-32600, "Invalid Request", request.get("id"))
             return
@@ -120,12 +120,12 @@ class MCPServer:
             self._send_error(-32600, "Method not specified", request.get("id"))
             return
 
-        # メソッドの取得
+        # 获取方法
         method = request["method"]
         params = request.get("params", {})
         request_id = request.get("id")
 
-        # メソッドの処理
+        # 处理方法
         if method == "initialize":
             self._handle_initialize(params, request_id)
         elif method == "tools/list":
@@ -139,7 +139,7 @@ class MCPServer:
         elif method == "resources/templates/list":
             self._handle_resources_templates_list(request_id)
         else:
-            # 登録されたツールを直接呼び出す
+            # 直接调用已注册的工具
             if method in self.tool_handlers:
                 try:
                     result = self.tool_handlers[method](params)
@@ -151,19 +151,19 @@ class MCPServer:
 
     def _handle_initialize(self, params: Dict[str, Any], request_id: Any):
         """
-        initializeメソッドを処理します。
+        处理 initialize 方法。
 
         Args:
-            params: リクエストパラメータ
-            request_id: リクエストID
+            params: 请求参数
+            request_id: 请求 ID
         """
-        # クライアント情報を取得（オプション）
+        # 获取客户端信息（可选）
         client_name = params.get("clientInfo", {}).get("name", "unknown")
         client_version = params.get("clientInfo", {}).get("version", "unknown")
 
-        self.logger.info(f"クライアント '{client_name} {client_version}' が接続しました")
+        self.logger.info(f"客户端 '{client_name} {client_version}' 已连接")
 
-        # サーバーの機能を返す
+        # 返回服务器功能
         response = {
             "protocolVersion": "2024-11-05",
             "serverInfo": {
@@ -180,11 +180,11 @@ class MCPServer:
 
     def _send_result(self, result: Any, request_id: Any):
         """
-        成功レスポンスを送信します。
+        发送成功响应。
 
         Args:
-            result: レスポンス結果
-            request_id: リクエストID
+            result: 响应结果
+            request_id: 请求 ID
         """
         response = {"jsonrpc": "2.0", "result": result, "id": request_id}
 
@@ -192,12 +192,12 @@ class MCPServer:
 
     def _send_error(self, code: int, message: str, request_id: Any):
         """
-        エラーレスポンスを送信します。
+        发送错误响应。
 
         Args:
-            code: エラーコード
-            message: エラーメッセージ
-            request_id: リクエストID
+            code: 错误代码
+            message: 错误消息
+            request_id: 请求 ID
         """
         response = {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": request_id}
 
@@ -205,33 +205,33 @@ class MCPServer:
 
     def _send_response(self, response: Dict[str, Any]):
         """
-        レスポンスを標準出力に送信します。
+        将响应发送到标准输出。
 
         Args:
-            response: レスポンス
+            response: 响应
         """
         response_json = json.dumps(response)
         print(response_json, flush=True)
-        self.logger.info(f"レスポンスを送信しました: {response_json}")
+        self.logger.info(f"已发送响应：{response_json}")
 
     def _get_tools(self) -> List[Dict[str, Any]]:
         """
-        サーバーが提供するツールの一覧を取得します。
+        获取服务器提供的工具列表。
 
         Returns:
-            ツールの一覧
+            工具列表
         """
         return list(self.tools.values())
 
     def _handle_tools_call(self, params: Dict[str, Any], request_id: Any):
         """
-        tools/callメソッドを処理します。
+        处理 tools/call 方法。
 
         Args:
-            params: リクエストパラメータ
-            request_id: リクエストID
+            params: 请求参数
+            request_id: 请求 ID
         """
-        # パラメータのバリデーション
+        # 参数验证
         if "name" not in params:
             self._send_error(-32602, "Invalid params: name is required", request_id)
             return
@@ -243,91 +243,89 @@ class MCPServer:
         tool_name = params["name"]
         arguments = params["arguments"]
 
-        # ツールの処理
+        # 处理工具
         if tool_name in self.tool_handlers:
             try:
                 result = self.tool_handlers[tool_name](arguments)
                 if isinstance(result, dict) and "content" in result:
                     self._send_result(result, request_id)
                 else:
-                    # 結果をコンテンツ形式に変換
+                    # 将结果转换为内容格式
                     content = [{"type": "text", "text": str(result)}]
                     self._send_result({"content": content}, request_id)
             except Exception as e:
-                self.logger.error(f"ツール '{tool_name}' の実行中にエラーが発生しました: {str(e)}")
+                self.logger.error(f"执行工具 '{tool_name}' 时发生错误：{str(e)}")
                 self._send_result(
                     {
-                        "content": [{"type": "text", "text": f"ツールの実行中にエラーが発生しました: {str(e)}"}],
+                        "content": [{"type": "text", "text": f"执行工具时发生错误：{str(e)}"}],
                         "isError": True,
                     },
                     request_id,
                 )
         else:
-            self._send_result(
-                {"content": [{"type": "text", "text": f"ツールが見つかりません: {tool_name}"}], "isError": True}, request_id
-            )
+            self._send_result({"content": [{"type": "text", "text": f"未找到工具：{tool_name}"}], "isError": True}, request_id)
 
     def _handle_tools_list(self, request_id: Any):
         """
-        tools/listメソッドを処理します。
+        处理 tools/list 方法。
 
         Args:
-            request_id: リクエストID
+            request_id: 请求 ID
         """
         tools = self._get_tools()
         self._send_result({"tools": tools}, request_id)
 
     def _handle_notifications_initialized(self, params: Dict[str, Any], request_id: Any):
         """
-        notifications/initializedメソッドを処理します。
-        クライアントの初期化完了通知を処理します。
+        处理 notifications/initialized 方法。
+        处理客户端初始化完成通知。
 
         Args:
-            params: リクエストパラメータ
-            request_id: リクエストID
+            params: 请求参数
+            request_id: 请求 ID
         """
-        self.logger.info("クライアントの初期化が完了しました")
-        # 通知なのでレスポンスは不要
-        # ただし、エラーが発生した場合はエラーレスポンスを返す必要がある
+        self.logger.info("客户端初始化已完成")
+        # 通知不需要响应
+        # 但如果发生错误，需要返回错误响应
         if request_id is not None:
             self._send_result({}, request_id)
 
     def _handle_resources_list(self, request_id: Any):
         """
-        resources/listメソッドを処理します。
-        利用可能なリソースの一覧を返します。
+        处理 resources/list 方法。
+        返回可用资源列表。
 
         Args:
-            request_id: リクエストID
+            request_id: 请求 ID
         """
         resources = self._get_resources()
         self._send_result({"resources": resources}, request_id)
 
     def _handle_resources_templates_list(self, request_id: Any):
         """
-        resources/templates/listメソッドを処理します。
-        利用可能なリソーステンプレートの一覧を返します。
+        处理 resources/templates/list 方法。
+        返回可用资源模板列表。
 
         Args:
-            request_id: リクエストID
+            request_id: 请求 ID
         """
         templates = self._get_resource_templates()
         self._send_result({"templates": templates}, request_id)
 
     def _get_resources(self) -> List[Dict[str, Any]]:
         """
-        サーバーが提供するリソースの一覧を取得します。
+        获取服务器提供的资源列表。
 
         Returns:
-            リソースの一覧
+            资源列表
         """
         return []
 
     def _get_resource_templates(self) -> List[Dict[str, Any]]:
         """
-        サーバーが提供するリソーステンプレートの一覧を取得します。
+        获取服务器提供的资源模板列表。
 
         Returns:
-            リソーステンプレートの一覧
+            资源模板列表
         """
         return []

@@ -1,60 +1,85 @@
 """
-RAGサービスモジュール
+RAG 服务模块
 
-ドキュメント処理、エンベディング生成、ベクトルデータベースを統合して、
-インデックス化と検索の機能を提供します。
+集成文档处理、嵌入向量生成和向量数据库，提供索引化和检索功能。
 """
 
 import os
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .document_processor import DocumentProcessor
 from .embedding_generator import EmbeddingGenerator
 from .vector_database import VectorDatabase
+from .reranker import Reranker
+
+_MAX_FETCH_LIMIT = 200
+_MAX_RERANK_FACTOR = 10
+_RERANK_ORDER_UNRANKED = 999
 
 
 class RAGService:
     """
-    RAGサービスクラス
+    RAG 服务类
 
-    ドキュメント処理、エンベディング生成、ベクトルデータベースを統合して、
-    インデックス化と検索の機能を提供します。
+    集成文档处理、嵌入向量生成和向量数据库，提供索引化和检索功能。
 
     Attributes:
-        document_processor: ドキュメント処理クラスのインスタンス
-        embedding_generator: エンベディング生成クラスのインスタンス
-        vector_database: ベクトルデータベースクラスのインスタンス
-        logger: ロガー
+        document_processor: 文档处理类实例
+        embedding_generator: 嵌入向量生成类实例
+        vector_database: 向量数据库类实例
+        logger: 日志记录器
     """
 
     def __init__(
-        self, document_processor: DocumentProcessor, embedding_generator: EmbeddingGenerator, vector_database: VectorDatabase
+        self,
+        document_processor: DocumentProcessor,
+        embedding_generator: EmbeddingGenerator,
+        vector_database: VectorDatabase,
+        reranker: Optional[Reranker] = None,
+        rerank_factor: int = 3,
     ):
         """
-        RAGServiceのコンストラクタ
+        RAGService 的构造函数
 
         Args:
-            document_processor: ドキュメント処理クラスのインスタンス
-            embedding_generator: エンベディング生成クラスのインスタンス
-            vector_database: ベクトルデータベースクラスのインスタンス
+            document_processor: 文档处理类实例
+            embedding_generator: 嵌入向量生成类实例
+            vector_database: 向量数据库类实例
+            reranker: 重排序器实例（None 时禁用重排序）
+            rerank_factor: 候选集倍率（fetch_limit = min(limit × factor, 200)）
         """
-        # ロガーの設定
+        # 设置日志记录器
         self.logger = logging.getLogger("rag_service")
         self.logger.setLevel(logging.INFO)
 
-        # コンポーネントの設定
+        # 设置组件
         self.document_processor = document_processor
         self.embedding_generator = embedding_generator
         self.vector_database = vector_database
+        self._reranker = reranker
+        self._reranker_factory = None
+        self.rerank_factor = max(1, min(int(rerank_factor), _MAX_RERANK_FACTOR))
 
-        # データベースの初期化
-        try:
-            self.vector_database.initialize_database()
-        except Exception as e:
-            self.logger.error(f"データベースの初期化に失敗しました: {str(e)}")
-            raise
+        # 初始化数据库
+        self.vector_database.initialize_database()
+
+    @property
+    def reranker(self):
+        """延迟初始化重排序器，仅在首次访问时调用 factory。"""
+        if self._reranker is None and self._reranker_factory is not None:
+            factory = self._reranker_factory
+            self._reranker_factory = None  # 先清空，防止重试风暴
+            try:
+                self._reranker = factory()
+            except Exception as e:
+                self.logger.error(f"重排序器初始化失败，将降级为无重排序模式：{e}")
+        return self._reranker
+
+    def set_reranker_factory(self, factory):
+        """设置重排序器延迟工厂函数，首次搜索时才实例化。"""
+        self._reranker_factory = factory
 
     def index_documents(
         self,
@@ -65,56 +90,56 @@ class RAGService:
         incremental: bool = False,
     ) -> Dict[str, Any]:
         """
-        ディレクトリ内のファイルをインデックス化します。
+        为目录内的文件建立索引。
 
         Args:
-            source_dir: インデックス化するファイルが含まれるディレクトリのパス
-            processed_dir: 処理済みファイルを保存するディレクトリのパス（指定がない場合はdata/processed）
-            chunk_size: チャンクサイズ（文字数）
-            chunk_overlap: チャンク間のオーバーラップ（文字数）
-            incremental: 差分のみをインデックス化するかどうか
+            source_dir: 包含要索引文件的目录路径
+            processed_dir: 保存已处理文件的目录路径（未指定时为 data/processed）
+            chunk_size: 分块大小（字符数）
+            chunk_overlap: 分块间的重叠量（字符数）
+            incremental: 是否仅进行增量索引
 
         Returns:
-            インデックス化の結果
-                - document_count: インデックス化されたドキュメント数
-                - processing_time: 処理時間（秒）
-                - success: 成功したかどうか
-                - error: エラーメッセージ（エラーが発生した場合）
+            索引化结果
+                - document_count: 已索引的文档数
+                - processing_time: 处理时间（秒）
+                - success: 是否成功
+                - error: 错误消息（发生错误时）
         """
         start_time = time.time()
         document_count = 0
 
-        # 処理済みディレクトリのデフォルト値
+        # 已处理目录的默认值
         if processed_dir is None:
             processed_dir = "data/processed"
 
         try:
-            # ディレクトリ内のファイルを処理
+            # 处理目录内的文件
             if incremental:
-                self.logger.info(f"ディレクトリ '{source_dir}' 内の差分ファイルをインデックス化しています...")
+                self.logger.info(f"正在为目录 '{source_dir}' 内的增量文件建立索引...")
             else:
-                self.logger.info(f"ディレクトリ '{source_dir}' 内のファイルをインデックス化しています...")
+                self.logger.info(f"正在为目录 '{source_dir}' 内的文件建立索引...")
 
             chunks = self.document_processor.process_directory(
                 source_dir, processed_dir, chunk_size, chunk_overlap, incremental
             )
 
             if not chunks:
-                self.logger.warning(f"ディレクトリ '{source_dir}' 内に処理可能なファイルが見つかりませんでした")
+                self.logger.warning(f"在目录 '{source_dir}' 内未找到可处理的文件")
                 return {
                     "document_count": 0,
                     "processing_time": time.time() - start_time,
                     "success": True,
-                    "message": f"ディレクトリ '{source_dir}' 内に処理可能なファイルが見つかりませんでした",
+                    "message": f"在目录 '{source_dir}' 内未找到可处理的文件",
                 }
 
-            # チャンクのコンテンツからエンベディングを生成
-            self.logger.info(f"{len(chunks)} チャンクのエンベディングを生成しています...")
+            # 从分块内容生成嵌入向量
+            self.logger.info(f"正在为 {len(chunks)} 个分块生成嵌入向量...")
             texts = [chunk["content"] for chunk in chunks]
             embeddings = self.embedding_generator.generate_embeddings(texts)
 
-            # ドキュメントをデータベースに挿入
-            self.logger.info(f"{len(chunks)} チャンクをデータベースに挿入しています...")
+            # 将文档插入数据库
+            self.logger.info(f"正在将 {len(chunks)} 个分块插入数据库...")
             documents = []
             for i, chunk in enumerate(chunks):
                 documents.append(
@@ -137,209 +162,219 @@ class RAGService:
             document_count = len(documents)
 
             processing_time = time.time() - start_time
-            self.logger.info(f"インデックス化が完了しました（{document_count} ドキュメント、{processing_time:.2f} 秒）")
+            self.logger.info(f"索引化完成（{document_count} 个文档，{processing_time:.2f} 秒）")
 
             return {
                 "document_count": document_count,
                 "processing_time": processing_time,
                 "success": True,
-                "message": f"{document_count} ドキュメントをインデックス化しました",
+                "message": f"已为 {document_count} 个文档建立索引",
             }
 
         except Exception as e:
             processing_time = time.time() - start_time
-            self.logger.error(f"インデックス化中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"索引化过程中发生错误：{str(e)}")
 
             return {"document_count": document_count, "processing_time": processing_time, "success": False, "error": str(e)}
+
+    def _merge_full_document_results(self, base_results: List[Dict]) -> List[Dict]:
+        """将全文分块合并到基础结果中，传播 _rerank_order 并保留最小 order 值。"""
+        full_doc_results = []
+        full_doc_parent_order = {}
+        processed_files = set()
+
+        for result in base_results:
+            file_path = result["file_path"]
+            if file_path in processed_files:
+                continue
+            processed_files.add(file_path)
+
+            parent_order = result.get("_rerank_order")
+            full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
+            for chunk in full_doc_chunks:
+                doc_id = chunk["document_id"]
+                existing_order = full_doc_parent_order.get(doc_id)
+                if existing_order is None or (parent_order is not None and parent_order < existing_order):
+                    full_doc_parent_order[doc_id] = parent_order
+            full_doc_results.extend(full_doc_chunks)
+
+        merged_results = base_results.copy()
+        existing_doc_ids = {result["document_id"] for result in merged_results}
+
+        for doc_chunk in full_doc_results:
+            if doc_chunk["document_id"] not in existing_doc_ids:
+                parent_order = full_doc_parent_order.get(doc_chunk["document_id"])
+                if parent_order is not None:
+                    doc_chunk["_rerank_order"] = parent_order
+                merged_results.append(doc_chunk)
+                existing_doc_ids.add(doc_chunk["document_id"])
+
+        if self.reranker:
+            merged_results.sort(
+                key=lambda x: (x.get("_rerank_order", _RERANK_ORDER_UNRANKED), x["file_path"], x["chunk_index"])
+            )
+        else:
+            merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
+
+        self.logger.info(f"检索结果（含全文）：{len(merged_results)} 条")
+        return merged_results
+
+    @staticmethod
+    def _clean_rerank_metadata(results: List[Dict]) -> List[Dict]:
+        """从结果中移除内部 _rerank_order 字段（rerank_score 是公共字段，保留）。"""
+        for r in results:
+            r.pop("_rerank_order", None)
+        return results
 
     def search(
         self, query: str, limit: int = 5, with_context: bool = False, context_size: int = 1, full_document: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        ベクトル検索を行います。
+        进行向量检索。
 
         Args:
-            query: 検索クエリ
-            limit: 返す結果の数（デフォルト: 5）
-            with_context: 前後のチャンクも取得するかどうか（デフォルト: False）
-            context_size: 前後に取得するチャンク数（デフォルト: 1）
-            full_document: ドキュメント全体を取得するかどうか（デフォルト: False）
+            query: 检索查询
+            limit: 返回结果的数量（默认：5）
+            with_context: 是否获取前后分块（默认：False）
+            context_size: 获取前后分块的数量（默认：1）
+            full_document: 是否获取文档全文（默认：False）
 
         Returns:
-            検索結果のリスト（関連度順）
-                - document_id: ドキュメントID
-                - content: コンテンツ
-                - file_path: ファイルパス
-                - similarity: 類似度
-                - metadata: メタデータ
-                - is_context: コンテキストチャンクかどうか（前後のチャンクの場合はTrue）
-                - is_full_document: 全文ドキュメントかどうか（ドキュメント全体の場合はTrue）
+            检索结果列表（按相关度排序）
+                - document_id: 文档 ID
+                - content: 内容
+                - file_path: 文件路径
+                - similarity: 相似度
+                - metadata: 元数据
+                - is_context: 是否为上下文分块（前后分块时为 True）
+                - is_full_document: 是否为全文文档（文档全文时为 True）
         """
         try:
-            # クエリからエンベディングを生成
-            self.logger.info(f"クエリ '{query}' のエンベディングを生成しています...")
+            if limit <= 0:
+                raise ValueError(f"limit 必须大于 0，当前值：{limit}")
+
+            # 从查询生成嵌入向量
+            self.logger.info(f"正在为查询 '{query}' 生成嵌入向量...")
             query_embedding = self.embedding_generator.generate_search_embedding(query)
 
-            # ベクトル検索
-            self.logger.info(f"クエリ '{query}' でベクトル検索を実行しています...")
-            results = self.vector_database.search(query_embedding, limit)
+            # 向量检索
+            self.logger.info(f"正在执行查询 '{query}' 的向量检索...")
+            if self.reranker:
+                fetch_limit = min(limit * self.rerank_factor, _MAX_FETCH_LIMIT)
+                initial_results = self.vector_database.search(query_embedding, fetch_limit)
+                k = min(limit, len(initial_results))
+                results = self.reranker.rerank(query, initial_results, k=k)
+                for rank_idx, r in enumerate(results):
+                    r["_rerank_order"] = rank_idx
+            else:
+                results = self.vector_database.search(query_embedding, limit)
 
-            # 前後のチャンクも取得する場合
+            # 获取前后分块的情况
             if with_context and context_size > 0:
                 context_results = []
-                processed_files = set()  # 処理済みのファイルとチャンクの組み合わせを記録
+                # 上下文分块 → 父命中分块的 _rerank_order 映射
+                context_parent_order = {}
+                processed_files = set()  # 记录已处理的文件和分块组合
 
                 for result in results:
                     file_path = result["file_path"]
                     chunk_index = result["chunk_index"]
                     file_chunk_key = f"{file_path}_{chunk_index}"
 
-                    # 既に処理済みのファイルとチャンクの組み合わせはスキップ
+                    # 跳过已处理的文件和分块组合
                     if file_chunk_key in processed_files:
                         continue
 
                     processed_files.add(file_chunk_key)
 
-                    # 前後のチャンクを取得
+                    # 获取前后分块
                     adjacent_chunks = self.vector_database.get_adjacent_chunks(file_path, chunk_index, context_size)
+                    parent_order = result.get("_rerank_order")
+                    for adj in adjacent_chunks:
+                        doc_id = adj["document_id"]
+                        existing_order = context_parent_order.get(doc_id)
+                        if existing_order is None or (parent_order is not None and parent_order < existing_order):
+                            context_parent_order[doc_id] = parent_order
                     context_results.extend(adjacent_chunks)
 
-                # 結果をマージ
+                # 合并结果
                 all_results = results.copy()
 
-                # 重複を避けるために、既に結果に含まれているドキュメントIDを記録
+                # 为避免重复，记录已包含的文档 ID
                 existing_doc_ids = {result["document_id"] for result in all_results}
 
-                # 重複していないコンテキストチャンクのみを追加
+                # 仅添加不重复的上下文分块，并传播 _rerank_order
                 for context in context_results:
                     if context["document_id"] not in existing_doc_ids:
+                        parent_order = context_parent_order.get(context["document_id"])
+                        if parent_order is not None:
+                            context["_rerank_order"] = parent_order
                         all_results.append(context)
                         existing_doc_ids.add(context["document_id"])
 
-                # ファイルパスとチャンクインデックスでソート
-                all_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
-
-                self.logger.info(f"検索結果（コンテキスト含む）: {len(all_results)} 件")
-
-                # ドキュメント全体を取得する場合
-                if full_document:
-                    full_doc_results = []
-                    processed_files = set()  # 処理済みのファイルを記録
-
-                    # 検索結果に含まれるファイルの全文を取得
-                    for result in all_results:
-                        file_path = result["file_path"]
-
-                        # 既に処理済みのファイルはスキップ
-                        if file_path in processed_files:
-                            continue
-
-                        processed_files.add(file_path)
-
-                        # ファイルの全文を取得
-                        full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
-                        full_doc_results.extend(full_doc_chunks)
-
-                    # 結果をマージ
-                    merged_results = all_results.copy()
-
-                    # 重複を避けるために、既に結果に含まれているドキュメントIDを記録
-                    existing_doc_ids = {result["document_id"] for result in merged_results}
-
-                    # 重複していない全文チャンクのみを追加
-                    for doc_chunk in full_doc_results:
-                        if doc_chunk["document_id"] not in existing_doc_ids:
-                            merged_results.append(doc_chunk)
-                            existing_doc_ids.add(doc_chunk["document_id"])
-
-                    # ファイルパスとチャンクインデックスでソート
-                    merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
-
-                    self.logger.info(f"検索結果（全文含む）: {len(merged_results)} 件")
-                    return merged_results
+                # 排序
+                if self.reranker:
+                    all_results.sort(
+                        key=lambda x: (x.get("_rerank_order", _RERANK_ORDER_UNRANKED), x["file_path"], x["chunk_index"])
+                    )
                 else:
-                    return all_results
+                    all_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
+
+                self.logger.info(f"检索结果（含上下文）：{len(all_results)} 条")
+
+                # 获取文档全文的情况
+                if full_document:
+                    return self._clean_rerank_metadata(self._merge_full_document_results(all_results))
+                else:
+                    return self._clean_rerank_metadata(all_results)
             else:
-                # ドキュメント全体を取得する場合
+                # 获取文档全文的情况
                 if full_document:
-                    full_doc_results = []
-                    processed_files = set()  # 処理済みのファイルを記録
-
-                    # 検索結果に含まれるファイルの全文を取得
-                    for result in results:
-                        file_path = result["file_path"]
-
-                        # 既に処理済みのファイルはスキップ
-                        if file_path in processed_files:
-                            continue
-
-                        processed_files.add(file_path)
-
-                        # ファイルの全文を取得
-                        full_doc_chunks = self.vector_database.get_document_by_file_path(file_path)
-                        full_doc_results.extend(full_doc_chunks)
-
-                    # 結果をマージ
-                    merged_results = results.copy()
-
-                    # 重複を避けるために、既に結果に含まれているドキュメントIDを記録
-                    existing_doc_ids = {result["document_id"] for result in merged_results}
-
-                    # 重複していない全文チャンクのみを追加
-                    for doc_chunk in full_doc_results:
-                        if doc_chunk["document_id"] not in existing_doc_ids:
-                            merged_results.append(doc_chunk)
-                            existing_doc_ids.add(doc_chunk["document_id"])
-
-                    # ファイルパスとチャンクインデックスでソート
-                    merged_results.sort(key=lambda x: (x["file_path"], x["chunk_index"]))
-
-                    self.logger.info(f"検索結果（全文含む）: {len(merged_results)} 件")
-                    return merged_results
+                    return self._clean_rerank_metadata(self._merge_full_document_results(results))
                 else:
-                    self.logger.info(f"検索結果: {len(results)} 件")
-                    return results
+                    self.logger.info(f"检索结果：{len(results)} 条")
+                    return self._clean_rerank_metadata(results)
 
         except Exception as e:
-            self.logger.error(f"検索中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"检索过程中发生错误：{str(e)}")
             raise
 
     def clear_index(self) -> Dict[str, Any]:
         """
-        インデックスをクリアします。
+        清除索引。
 
         Returns:
-            クリアの結果
-                - deleted_count: 削除されたドキュメント数
-                - success: 成功したかどうか
-                - error: エラーメッセージ（エラーが発生した場合）
+            清除结果
+                - deleted_count: 已删除的文档数
+                - success: 是否成功
+                - error: 错误消息（发生错误时）
         """
         try:
-            # データベースをクリア
-            self.logger.info("インデックスをクリアしています...")
+            # 清除数据库
+            self.logger.info("正在清除索引...")
             deleted_count = self.vector_database.clear_database()
 
-            self.logger.info(f"インデックスをクリアしました（{deleted_count} ドキュメントを削除）")
-            return {"deleted_count": deleted_count, "success": True, "message": f"{deleted_count} ドキュメントを削除しました"}
+            self.logger.info(f"索引已清除（删除了 {deleted_count} 个文档）")
+            return {"deleted_count": deleted_count, "success": True, "message": f"已删除 {deleted_count} 个文档"}
 
         except Exception as e:
-            self.logger.error(f"インデックスのクリア中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"清除索引时发生错误：{str(e)}")
 
             return {"deleted_count": 0, "success": False, "error": str(e)}
 
     def get_document_count(self) -> int:
         """
-        インデックス内のドキュメント数を取得します。
+        获取索引中的文档数量。
 
         Returns:
-            ドキュメント数
+            文档数量
         """
         try:
-            # ドキュメント数を取得
+            # 获取文档数量
             count = self.vector_database.get_document_count()
-            self.logger.info(f"インデックス内のドキュメント数: {count}")
+            self.logger.info(f"索引中的文档数量：{count}")
             return count
 
         except Exception as e:
-            self.logger.error(f"ドキュメント数の取得中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"获取文档数量时发生错误：{str(e)}")
             raise

@@ -1,7 +1,7 @@
 """
-ベクトルデータベースモジュール
+向量数据库模块
 
-PostgreSQLとpgvectorを使用してベクトルの保存と検索を行います。
+使用 PostgreSQL 和 pgvector 进行向量的保存和检索。
 """
 
 import logging
@@ -11,87 +11,87 @@ import os
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 
-# .envの読み込み
+# 加载 .env
 load_dotenv()
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
 
 
 class VectorDatabase:
     """
-    ベクトルデータベースクラス
+    向量数据库类
 
-    PostgreSQLとpgvectorを使用してベクトルの保存と検索を行います。
+    使用 PostgreSQL 和 pgvector 进行向量的保存和检索。
 
     Attributes:
-        connection_params: 接続パラメータ
-        connection: データベース接続
-        logger: ロガー
+        connection_params: 连接参数
+        connection: 数据库连接
+        logger: 日志记录器
     """
 
     def __init__(self, connection_params: Dict[str, Any]):
         """
-        VectorDatabaseのコンストラクタ
+        VectorDatabase 的构造函数
 
         Args:
-            connection_params: 接続パラメータ
-                - host: ホスト名
-                - port: ポート番号
-                - user: ユーザー名
-                - password: パスワード
-                - database: データベース名
+            connection_params: 连接参数
+                - host: 主机名
+                - port: 端口号
+                - user: 用户名
+                - password: 密码
+                - database: 数据库名
         """
-        # ロガーの設定
+        # 设置日志记录器
         self.logger = logging.getLogger("vector_database")
         self.logger.setLevel(logging.INFO)
 
-        # 接続パラメータの保存
+        # 保存连接参数
         self.connection_params = connection_params
         self.connection = None
 
     def connect(self) -> None:
         """
-        データベースに接続します。
+        连接数据库。
 
         Raises:
-            Exception: 接続に失敗した場合
+            Exception: 连接失败时
         """
         try:
             self.connection = psycopg2.connect(**self.connection_params)
-            self.logger.info("データベースに接続しました")
+            self.logger.info("已连接数据库")
         except Exception as e:
-            self.logger.error(f"データベースへの接続に失敗しました: {str(e)}")
+            self.logger.error(f"连接数据库失败：{str(e)}")
             raise
 
     def disconnect(self) -> None:
         """
-        データベースから切断します。
+        断开数据库连接。
         """
         if self.connection:
             self.connection.close()
             self.connection = None
-            self.logger.info("データベースから切断しました")
+            self.logger.info("已断开数据库连接")
 
     def initialize_database(self) -> None:
         """
-        データベースを初期化します。
+        初始化数据库。
 
-        テーブルとインデックスを作成します。
+        创建表和索引。
 
         Raises:
-            Exception: 初期化に失敗した場合
+            Exception: 初始化失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # pgvectorエクステンションの有効化
+            # 启用 pgvector 扩展
             cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
-            # ドキュメントテーブルの作成
+            # 创建文档表
             cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS documents (
                     id SERIAL PRIMARY KEY,
@@ -105,7 +105,7 @@ class VectorDatabase:
                 );
             """)
 
-            # インデックスの作成
+            # 创建索引
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_documents_document_id ON documents (document_id);
             """)
@@ -116,19 +116,19 @@ class VectorDatabase:
                 CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents USING ivfflat (embedding vector_cosine_ops);
             """)
 
-            # コミット
+            # 提交
             self.connection.commit()
-            self.logger.info("データベースを初期化しました")
+            self.logger.info("数据库已初始化")
 
         except Exception as e:
-            # ロールバック
+            # 回滚
             if self.connection:
                 self.connection.rollback()
-            self.logger.error(f"データベースの初期化に失敗しました: {str(e)}")
+            self.logger.error(f"数据库初始化失败：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
@@ -142,37 +142,37 @@ class VectorDatabase:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        ドキュメントを挿入します。
+        插入文档。
 
         Args:
-            document_id: ドキュメントID
-            content: ドキュメントの内容
-            file_path: ファイルパス
-            chunk_index: チャンクインデックス
-            embedding: エンベディング
-            metadata: メタデータ（オプション）
+            document_id: 文档 ID
+            content: 文档内容
+            file_path: 文件路径
+            chunk_index: 分块索引
+            embedding: 嵌入向量
+            metadata: 元数据（可选）
 
         Raises:
-            Exception: 挿入に失敗した場合
+            Exception: 插入失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # メタデータをJSON形式に変換
+            # 将元数据转换为 JSON 格式
             metadata_json = json.dumps(metadata) if metadata else None
 
-            # ドキュメントの挿入
+            # 插入文档
             cursor.execute(
                 """
                 INSERT INTO documents (document_id, content, file_path, chunk_index, embedding, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (document_id) 
-                DO UPDATE SET 
+                ON CONFLICT (document_id)
+                DO UPDATE SET
                     content = EXCLUDED.content,
                     file_path = EXCLUDED.file_path,
                     chunk_index = EXCLUDED.chunk_index,
@@ -183,52 +183,52 @@ class VectorDatabase:
                 (document_id, content, file_path, chunk_index, embedding, metadata_json),
             )
 
-            # コミット
+            # 提交
             self.connection.commit()
-            self.logger.debug(f"ドキュメント '{document_id}' を挿入しました")
+            self.logger.debug(f"已插入文档 '{document_id}'")
 
         except Exception as e:
-            # ロールバック
+            # 回滚
             if self.connection:
                 self.connection.rollback()
-            self.logger.error(f"ドキュメントの挿入に失敗しました: {str(e)}")
+            self.logger.error(f"插入文档失败：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def batch_insert_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
-        複数のドキュメントをバッチ挿入します。
+        批量插入多个文档。
 
         Args:
-            documents: ドキュメントのリスト
-                各ドキュメントは以下のキーを持つ辞書:
-                - document_id: ドキュメントID
-                - content: ドキュメントの内容
-                - file_path: ファイルパス
-                - chunk_index: チャンクインデックス
-                - embedding: エンベディング
-                - metadata: メタデータ（オプション）
+            documents: 文档列表
+                每个文档是包含以下键的字典：
+                - document_id: 文档 ID
+                - content: 文档内容
+                - file_path: 文件路径
+                - chunk_index: 分块索引
+                - embedding: 嵌入向量
+                - metadata: 元数据（可选）
 
         Raises:
-            Exception: 挿入に失敗した場合
+            Exception: 插入失败时
         """
         if not documents:
-            self.logger.warning("挿入するドキュメントがありません")
+            self.logger.warning("没有要插入的文档")
             return
 
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # バッチ挿入用のデータ作成
+            # 创建批量插入数据
             values = []
             for doc in documents:
                 metadata_json = json.dumps(doc.get("metadata")) if doc.get("metadata") else None
@@ -236,13 +236,13 @@ class VectorDatabase:
                     (doc["document_id"], doc["content"], doc["file_path"], doc["chunk_index"], doc["embedding"], metadata_json)
                 )
 
-            # バッチ挿入
+            # 批量插入
             cursor.executemany(
                 """
                 INSERT INTO documents (document_id, content, file_path, chunk_index, embedding, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (document_id) 
-                DO UPDATE SET 
+                ON CONFLICT (document_id)
+                DO UPDATE SET
                     content = EXCLUDED.content,
                     file_path = EXCLUDED.file_path,
                     chunk_index = EXCLUDED.chunk_index,
@@ -253,49 +253,49 @@ class VectorDatabase:
                 values,
             )
 
-            # コミット
+            # 提交
             self.connection.commit()
-            self.logger.info(f"{len(documents)} 個のドキュメントを挿入しました")
+            self.logger.info(f"已插入 {len(documents)} 个文档")
 
         except Exception as e:
-            # ロールバック
+            # 回滚
             if self.connection:
                 self.connection.rollback()
-            self.logger.error(f"ドキュメントのバッチ挿入に失敗しました: {str(e)}")
+            self.logger.error(f"批量插入文档失败：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def search(self, query_embedding: List[float], limit: int = 5) -> List[Dict[str, Any]]:
         """
-        ベクトル検索を行います。
+        进行向量检索。
 
         Args:
-            query_embedding: クエリのエンベディング
-            limit: 返す結果の数（デフォルト: 5）
+            query_embedding: 查询的嵌入向量
+            limit: 返回结果的数量（默认：5）
 
         Returns:
-            検索結果のリスト（関連度順）
+            检索结果列表（按相关度排序）
 
         Raises:
-            Exception: 検索に失敗した場合
+            Exception: 检索失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # クエリエンベディングをPostgreSQLの配列構文に変換
+            # 将查询嵌入向量转换为 PostgreSQL 数组语法
             embedding_str = str(query_embedding)
             embedding_array = f"ARRAY{embedding_str}::vector"
 
-            # ベクトル検索
+            # 向量检索
             cursor.execute(
                 f"""
                 SELECT
@@ -316,12 +316,12 @@ class VectorDatabase:
                 (limit,),
             )
 
-            # 結果の取得
+            # 获取结果
             results = []
             for row in cursor.fetchall():
                 document_id, content, file_path, chunk_index, metadata_json, similarity = row
 
-                # メタデータをJSONからデコード
+                # 从 JSON 解码元数据
                 if metadata_json:
                     if isinstance(metadata_json, str):
                         try:
@@ -329,7 +329,7 @@ class VectorDatabase:
                         except json.JSONDecodeError:
                             metadata = {}
                     else:
-                        # 既に辞書型の場合はそのまま使用
+                        # 如果已经是字典类型则直接使用
                         metadata = metadata_json
                 else:
                     metadata = {}
@@ -345,217 +345,215 @@ class VectorDatabase:
                     }
                 )
 
-            self.logger.info(f"クエリに対して {len(results)} 件の結果が見つかりました")
+            self.logger.info(f"查询找到 {len(results)} 条结果")
             return results
 
         except Exception as e:
-            self.logger.error(f"ベクトル検索中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"向量检索过程中发生错误：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def delete_document(self, document_id: str) -> bool:
         """
-        ドキュメントを削除します。
+        删除文档。
 
         Args:
-            document_id: 削除するドキュメントのID
+            document_id: 要删除的文档 ID
 
         Returns:
-            削除に成功した場合はTrue、ドキュメントが見つからない場合はFalse
+            删除成功时返回 True，未找到文档时返回 False
 
         Raises:
-            Exception: 削除に失敗した場合
+            Exception: 删除失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # ドキュメントの削除
+            # 删除文档
             cursor.execute("DELETE FROM documents WHERE document_id = %s;", (document_id,))
 
-            # 削除された行数を取得
+            # 获取删除的行数
             deleted_rows = cursor.rowcount
 
-            # コミット
+            # 提交
             self.connection.commit()
 
             if deleted_rows > 0:
-                self.logger.info(f"ドキュメント '{document_id}' を削除しました")
+                self.logger.info(f"已删除文档 '{document_id}'")
                 return True
             else:
-                self.logger.warning(f"ドキュメント '{document_id}' が見つかりません")
+                self.logger.warning(f"未找到文档 '{document_id}'")
                 return False
 
         except Exception as e:
-            # ロールバック
+            # 回滚
             if self.connection:
                 self.connection.rollback()
-            self.logger.error(f"ドキュメントの削除中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"删除文档时发生错误：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def delete_by_file_path(self, file_path: str) -> int:
         """
-        ファイルパスに基づいてドキュメントを削除します。
+        根据文件路径删除文档。
 
         Args:
-            file_path: 削除するドキュメントのファイルパス
+            file_path: 要删除文档的文件路径
 
         Returns:
-            削除されたドキュメントの数
+            删除的文档数量
 
         Raises:
-            Exception: 削除に失敗した場合
+            Exception: 删除失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # ドキュメントの削除
+            # 删除文档
             cursor.execute("DELETE FROM documents WHERE file_path = %s;", (file_path,))
 
-            # 削除された行数を取得
+            # 获取删除的行数
             deleted_rows = cursor.rowcount
 
-            # コミット
+            # 提交
             self.connection.commit()
 
-            self.logger.info(f"ファイルパス '{file_path}' に関連する {deleted_rows} 個のドキュメントを削除しました")
+            self.logger.info(f"已删除与文件路径 '{file_path}' 相关的 {deleted_rows} 个文档")
             return deleted_rows
 
         except Exception as e:
-            # ロールバック
+            # 回滚
             if self.connection:
                 self.connection.rollback()
-            self.logger.error(f"ドキュメントの削除中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"删除文档时发生错误：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def clear_database(self) -> int:
         """
-        データベースをクリアします（全てのドキュメントを削除）。
+        清除数据库（删除所有文档）。
 
         Raises:
-            Exception: クリアに失敗した場合
+            Exception: 清除失败时
 
         Returns:
-            削除されたドキュメントの数。テーブルをDROPするため、削除前の数を返します。
+            删除的文档数量。由于会 DROP 表，因此返回删除前的数量。
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # 削除前のドキュメント数を取得
+            # 获取删除前的文档数量
             count_before_delete = self.get_document_count()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # テーブルを削除してスキーマもクリア
+            # 删除表以清除架构
             cursor.execute("DROP TABLE IF EXISTS documents;")
 
-            # コミット
+            # 提交
             self.connection.commit()
 
             if count_before_delete > 0:
-                self.logger.info(
-                    f"データベースをクリアしました（documentsテーブルを削除、{count_before_delete} 個のドキュメントが対象でした）"
-                )
+                self.logger.info(f"数据库已清除（删除了 documents 表，目标文档数为 {count_before_delete} 个）")
             else:
-                self.logger.info("データベースをクリアしました（documentsテーブルを削除）")
+                self.logger.info("数据库已清除（删除了 documents 表）")
             return count_before_delete
 
         except Exception as e:
-            # ロールバック
+            # 回滚
             if self.connection:
                 self.connection.rollback()
-            self.logger.error(f"データベースのクリア中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"清除数据库时发生错误：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def get_document_count(self) -> int:
         """
-        データベース内のドキュメント数を取得します。
+        获取数据库中的文档数量。
 
         Returns:
-            ドキュメント数
+            文档数量
 
         Raises:
-            Exception: 取得に失敗した場合
+            Exception: 获取失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # ドキュメント数を取得
+            # 获取文档数量
             cursor.execute("SELECT COUNT(*) FROM documents;")
             count = cursor.fetchone()[0]
 
-            self.logger.info(f"データベース内のドキュメント数: {count}")
+            self.logger.info(f"数据库中的文档数量：{count}")
             return count
 
         except psycopg2.errors.UndefinedTable:
-            # テーブルが存在しない場合は0を返す
-            self.connection.rollback()  # エラー状態をリセット
-            self.logger.info("documentsテーブルが存在しないため、ドキュメント数は0です")
+            # 表不存在时返回 0
+            self.connection.rollback()  # 重置错误状态
+            self.logger.info("documents 表不存在，文档数量为 0")
             return 0
         except Exception as e:
-            self.logger.error(f"ドキュメント数の取得中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"获取文档数量时发生错误：{str(e)}")
             raise
 
     def get_adjacent_chunks(self, file_path: str, chunk_index: int, context_size: int = 1) -> List[Dict[str, Any]]:
         """
-        指定されたチャンクの前後のチャンクを取得します。
+        获取指定分块的前后分块。
 
         Args:
-            file_path: ファイルパス
-            chunk_index: チャンクインデックス
-            context_size: 前後に取得するチャンク数（デフォルト: 1）
+            file_path: 文件路径
+            chunk_index: 分块索引
+            context_size: 获取前后分块的数量（默认：1）
 
         Returns:
-            前後のチャンクのリスト
+            前后分块的列表
 
         Raises:
-            Exception: 取得に失敗した場合
+            Exception: 获取失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # 前後のチャンクを取得
+            # 获取前后分块
             min_index = max(0, chunk_index - context_size)
             max_index = chunk_index + context_size
 
@@ -581,12 +579,12 @@ class VectorDatabase:
                 (file_path, min_index, max_index, chunk_index),
             )
 
-            # 結果の取得
+            # 获取结果
             results = []
             for row in cursor.fetchall():
                 document_id, content, file_path, chunk_index, metadata_json, similarity = row
 
-                # メタデータをJSONからデコード
+                # 从 JSON 解码元数据
                 if metadata_json:
                     if isinstance(metadata_json, str):
                         try:
@@ -594,7 +592,7 @@ class VectorDatabase:
                         except json.JSONDecodeError:
                             metadata = {}
                     else:
-                        # 既に辞書型の場合はそのまま使用
+                        # 如果已经是字典类型则直接使用
                         metadata = metadata_json
                 else:
                     metadata = {}
@@ -607,46 +605,44 @@ class VectorDatabase:
                         "chunk_index": chunk_index,
                         "metadata": metadata,
                         "similarity": similarity,
-                        "is_context": True,  # コンテキストチャンクであることを示すフラグ
+                        "is_context": True,  # 标识为上下文分块的标志
                     }
                 )
 
-            self.logger.info(
-                f"ファイル '{file_path}' のチャンク {chunk_index} の前後 {len(results)} 件のチャンクを取得しました"
-            )
+            self.logger.info(f"获取了文件 '{file_path}' 的分块 {chunk_index} 前后 {len(results)} 个分块")
             return results
 
         except Exception as e:
-            self.logger.error(f"前後のチャンク取得中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"获取前后分块时发生错误：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()
 
     def get_document_by_file_path(self, file_path: str) -> List[Dict[str, Any]]:
         """
-        指定されたファイルパスに基づいてドキュメント全体を取得します。
+        根据指定的文件路径获取整个文档。
 
         Args:
-            file_path: ファイルパス
+            file_path: 文件路径
 
         Returns:
-            ドキュメント全体のチャンクのリスト
+            整个文档的分块列表
 
         Raises:
-            Exception: 取得に失敗した場合
+            Exception: 获取失败时
         """
         try:
-            # 接続がない場合は接続
+            # 如果没有连接则连接
             if not self.connection:
                 self.connect()
 
-            # カーソルの作成
+            # 创建游标
             cursor = self.connection.cursor()
 
-            # ファイルパスに基づいてドキュメントを取得
+            # 根据文件路径获取文档
             cursor.execute(
                 """
                 SELECT
@@ -666,12 +662,12 @@ class VectorDatabase:
                 (file_path,),
             )
 
-            # 結果の取得
+            # 获取结果
             results = []
             for row in cursor.fetchall():
                 document_id, content, file_path, chunk_index, metadata_json, similarity = row
 
-                # メタデータをJSONからデコード
+                # 从 JSON 解码元数据
                 if metadata_json:
                     if isinstance(metadata_json, str):
                         try:
@@ -679,7 +675,7 @@ class VectorDatabase:
                         except json.JSONDecodeError:
                             metadata = {}
                     else:
-                        # 既に辞書型の場合はそのまま使用
+                        # 如果已经是字典类型则直接使用
                         metadata = metadata_json
                 else:
                     metadata = {}
@@ -692,18 +688,18 @@ class VectorDatabase:
                         "chunk_index": chunk_index,
                         "metadata": metadata,
                         "similarity": similarity,
-                        "is_full_document": True,  # 全文ドキュメントであることを示すフラグ
+                        "is_full_document": True,  # 标识为全文文档的标志
                     }
                 )
 
-            self.logger.info(f"ファイル '{file_path}' の全文 {len(results)} チャンクを取得しました")
+            self.logger.info(f"获取了文件 '{file_path}' 的全文 {len(results)} 个分块")
             return results
 
         except Exception as e:
-            self.logger.error(f"ドキュメント全文の取得中にエラーが発生しました: {str(e)}")
+            self.logger.error(f"获取文档全文时发生错误：{str(e)}")
             raise
 
         finally:
-            # カーソルを閉じる
+            # 关闭游标
             if "cursor" in locals() and cursor:
                 cursor.close()

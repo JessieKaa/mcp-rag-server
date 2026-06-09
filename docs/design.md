@@ -1,104 +1,104 @@
-# 要件・設計書
+# 需求与设计文档
 
-## 1. 要件定義
+## 1. 需求定义
 
-### 1.1 基本情報
-- ソフトウェア名称: MCP RAG Server
-- リポジトリ名: mcp-rag-server
+### 1.1 基本信息
+- 软件名称：MCP RAG Server
+- 仓库名称：mcp-rag-server
 
-### 1.2 プロジェクト概要
+### 1.2 项目概述
 
-本プロジェクトは、Model Context Protocol (MCP)に準拠したRAG（Retrieval-Augmented Generation）機能を持つPythonサーバーを提供することを目的とする。マークダウンファイル、テキストファイル、パワーポイント、PDFなど複数の形式のドキュメントをデータソースとして、選択可能なエンベディングモデル（multilingual-e5-large、ruriなど）を使用してインデックス化し、ベクトル検索によって関連情報を取得する機能を提供する。
+本项目旨在提供一个符合 Model Context Protocol (MCP) 标准的 RAG（Retrieval-Augmented Generation）功能 Python 服务器。它以多种格式的文档（如 Markdown 文件、文本文件、PowerPoint、PDF 等）作为数据源，使用可选的嵌入模型（multilingual-e5-large、ruri 等）进行索引，并提供通过向量检索获取相关信息的功能。
 
-### 1.3 機能要件
+### 1.3 功能需求
 
-#### 1.3.1 MCPサーバーの基本実装
-- JSON-RPC over stdioベースで動作
-- ツールの登録と実行のためのメカニズム
-- エラーハンドリングとロギング
+#### 1.3.1 MCP 服务器基本实现
+- 基于 JSON-RPC over stdio 运行
+- 提供工具注册和执行机制
+- 错误处理和日志记录
 
-#### 1.3.2 RAG機能
-- 複数形式のドキュメント（マークダウン、テキスト、パワーポイント、PDF）の読み込みと解析
-- 階層構造を持つソースディレクトリに対応
-- Markitdownを使用したパワーポイントやPDFからのマークダウン変換
-- 選択可能なエンベディングモデル（multilingual-e5-large、ruriなど）を使用したエンベディング生成
-- PostgreSQLのpgvectorを使用したベクトルデータベース
-- ベクトル検索による関連情報の取得
-- 前後のチャンク取得機能（コンテキストの連続性を確保）
-- ドキュメント全文取得機能（完全なコンテキストを提供）
-- 差分インデックス化機能（新規・変更ファイルのみを処理）
+#### 1.3.2 RAG 功能
+- 支持多种格式文档（Markdown、文本、PowerPoint、PDF）的读取和解析
+- 支持具有层级结构的源目录
+- 使用 Markitdown 将 PowerPoint 和 PDF 转换为 Markdown
+- 使用可选的嵌入模型（multilingual-e5-large、ruri 等）生成嵌入向量
+- 使用 PostgreSQL 的 pgvector 实现向量数据库
+- 通过向量检索获取相关信息
+- 获取前后分块功能（确保上下文连续性）
+- 获取文档全文功能（提供完整上下文）
+- 增量索引功能（仅处理新增和变更的文件）
 
-#### 1.3.3 ツール
-- ベクトル検索ツール（MCP）
-- ドキュメント数取得ツール（MCP）
-- インデックス管理ツール（CLI）
+#### 1.3.3 工具
+- 向量检索工具（MCP）
+- 文档数量获取工具（MCP）
+- 索引管理工具（CLI）
 
-### 1.4 非機能要件
+### 1.4 非功能需求
 
-- 迅速なレスポンス
-- シンプルな構成とメンテナンス性重視
-- 拡張性の高い設計
+- 快速响应
+- 注重简洁的架构和可维护性
+- 高扩展性设计
 
-### 1.5 制約条件
+### 1.5 约束条件
 
-- Python 3.10以上で動作
-- JSON-RPC over stdioベースで動作
-- PostgreSQLとpgvectorエクステンションが必要
+- 运行于 Python 3.10 以上
+- 支持 JSON-RPC over stdio（默认）和 HTTP SSE 两种传输方式
+- 需要 PostgreSQL 和 pgvector 扩展
 
-### 1.6 開発環境
+### 1.6 开发环境
 
-- 言語: Python
-- 外部ライブラリ:
+- 语言：Python
+- 外部库：
   - `mcp[cli]` (Model Context Protocol)
   - `python-dotenv`
-  - `psycopg2-binary` (PostgreSQL接続)
-  - `sentence-transformers` (エンベディング生成)
-  - `markdown` (マークダウン解析)
-  - `numpy` (ベクトル操作)
+  - `psycopg2-binary` (PostgreSQL 连接)
+  - `sentence-transformers` (嵌入向量生成)
+  - `markdown` (Markdown 解析)
+  - `numpy` (向量操作)
 
-### 1.7 成果物
+### 1.7 交付物
 
-- Python製MCPサーバー
-- RAG機能の実装
-- README / 利用手順
-- 設計書
+- Python 编写的 MCP 服务器
+- RAG 功能实现
+- README / 使用说明
+- 设计文档
 
-## 2. システム設計
+## 2. 系统设计
 
-### 2.1 システム概要設計
+### 2.1 系统概要设计
 
-#### 2.1.1 システムアーキテクチャ
+#### 2.1.1 系统架构
 
-##### システム構成図
+##### 系统构成图
 
 ```mermaid
 graph TB
-    %% ノードの定義
-    Client[MCP Host<br>Cline/Cursor] 
+    %% 节点定义
+    Client[MCP 主机<br>Cline/Cursor] 
     MCP[MCP RAG Server<br>Python]
     DB[(PostgreSQL<br>pgvector)]
-    CLI[CLI Tool]
-    Docs[Document Files]
-    User[User]
+    CLI[CLI 工具]
+    Docs[文档文件]
+    User[用户]
     
-    %% 関係の定義
+    %% 关系定义
     Client -->|"search<br>get_document_count<br>JSON-RPC over stdio"| MCP
-    MCP -->|"ベクトル検索<br>データ取得"| DB
+    MCP -->|"向量检索<br>数据获取"| DB
     
     User -->|"index<br>clear<br>count"| CLI
-    CLI -->|"インデックス化<br>クリア<br>カウント"| MCP
+    CLI -->|"索引化<br>清除<br>计数"| MCP
     
-    MCP -->|"読み込み<br>解析"| Docs
-    CLI -->|"読み込み<br>解析"| Docs
+    MCP -->|"读取<br>解析"| Docs
+    CLI -->|"读取<br>解析"| Docs
     
-    %% サブグラフの定義
-    subgraph "MCP Server Environment"
+    %% 子图定义
+    subgraph "MCP 服务器环境"
         MCP
         CLI
         Docs
     end
     
-    %% スタイル設定
+    %% 样式设置
     classDef client fill:#f9f,stroke:#333,stroke-width:2px;
     classDef server fill:#bbf,stroke:#333,stroke-width:2px;
     classDef database fill:#bfb,stroke:#333,stroke-width:2px;
@@ -114,93 +114,122 @@ graph TB
     class User user;
 ```
 
-##### インデックス化のシーケンス図
+##### 索引化时序图
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant CLI as CLI Tool
-    participant RAG as RAG Service
-    participant DocProc as Document Processor
+    participant CLI as CLI 工具
+    participant RAG as RAG 服务
+    participant DocProc as 文档处理器
     participant DB as PostgreSQL
-    participant Files as Document Files
+    participant Files as 文档文件
     
-    %% 全件インデックス化
+    %% 全量索引化
     User->>CLI: python -m src.cli index
     CLI->>RAG: index_documents()
     RAG->>DocProc: process_directory()
-    DocProc->>Files: 全ファイルを読み込み
-    Files-->>DocProc: ファイル内容
-    DocProc->>DocProc: チャンク分割
-    DocProc->>DocProc: ファイルレジストリ作成
-    DocProc-->>RAG: チャンクリスト
-    RAG->>RAG: エンベディング生成
+    DocProc->>Files: 读取所有文件
+    Files-->>DocProc: 文件内容
+    DocProc->>DocProc: 分块
+    DocProc->>DocProc: 创建文件注册表
+    DocProc-->>RAG: 分块列表
+    RAG->>RAG: 生成嵌入向量
     RAG->>DB: batch_insert_documents
-    DB-->>RAG: 挿入結果
-    RAG-->>CLI: 処理結果
-    CLI-->>User: インデックス化完了メッセージ
+    DB-->>RAG: 插入结果
+    RAG-->>CLI: 处理结果
+    CLI-->>User: 索引化完成消息
     
-    %% インデックスクリア
+    %% 索引清除
     User->>CLI: python -m src.cli clear
-    CLI->>DocProc: ファイルレジストリ削除
+    CLI->>DocProc: 删除文件注册表
     CLI->>RAG: clear_index()
     RAG->>DB: clear_database()
-    DB-->>RAG: 削除結果
-    RAG-->>CLI: 処理結果
-    CLI-->>User: インデックスクリア完了メッセージ
+    DB-->>RAG: 删除结果
+    RAG-->>CLI: 处理结果
+    CLI-->>User: 索引清除完成消息
 ```
 
-##### RAG（検索）のシーケンス図
+##### RAG（检索）时序图
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant Client as MCP Host (Cline/Cursor)
+    participant Client as MCP 主机 (Cline/Cursor)
     participant MCP as MCP RAG Server
-    participant RAG as RAG Service
-    participant EmbGen as Embedding Generator
+    participant RAG as RAG 服务
+    participant EmbGen as 嵌入向量生成器
     participant DB as PostgreSQL
     
-    %% 検索リクエスト
-    User->>Client: 検索クエリ入力
+    %% 检索请求
+    User->>Client: 输入检索查询
     Client->>MCP: search(query, limit)
     MCP->>RAG: search(query, limit)
     
-    %% エンベディング生成
+    %% 嵌入向量生成
     RAG->>EmbGen: generate_search_embedding(query)
-    EmbGen-->>RAG: クエリエンベディング
+    EmbGen-->>RAG: 查询嵌入向量
     
-    %% ベクトル検索
+    %% 向量检索
     RAG->>DB: search(query_embedding, limit)
-    DB-->>RAG: 検索結果
+    DB-->>RAG: 检索结果
     
-    %% 結果整形
-    RAG-->>MCP: 検索結果
-    MCP-->>Client: 検索結果
-    Client-->>User: 検索結果表示
+    %% 结果格式化
+    RAG-->>MCP: 检索结果
+    MCP-->>Client: 检索结果
+    Client-->>User: 显示检索结果
 ```
 
-#### 2.1.2 主要コンポーネント
-- **MCPサーバー**
-  - JSON-RPC over stdioをリッスン
-  - ツールの登録と実行を管理
-- **ドキュメント管理**
-  - 複数形式のドキュメントの読み込みと解析
-  - Markitdownを使用した形式変換
-  - チャンク分割
-  - ファイルレジストリによる差分管理
-- **エンベディング生成**
-  - multilingual-e5-largeモデルを使用
-  - テキストからベクトル表現を生成
-- **ベクトルデータベース**
-  - PostgreSQLとpgvectorを使用
-  - ベクトルの保存と検索
+#### 2.1.2 主要组件
+- **SDK 服务器（`server.py`）**
+  - 基于官方 MCP Python SDK（`mcp.server.lowlevel.Server`）
+  - `ToolRegistry`：防止重复注册的工具聚合中心
+  - 支持 stdio 和 HTTP SSE 两种传输方式
+  - 旧版插件通过 `_adapt_legacy_tools()` 自动桥接
+- **旧版 MCP 服务器（`mcp_server.py`，保留兼容）**
+  - 手写的 JSON-RPC over stdio 实现
+  - 供旧版测试和旧版插件使用，不再作为主传输层
+- **文档管理**
+  - 读取和解析多种格式的文档
+  - 使用 Markitdown 进行格式转换
+  - 分块处理
+  - 通过文件注册表进行增量管理
+- **嵌入向量生成**
+  - 支持本地模型（sentence-transformers）和 OpenAI 兼容 API
+  - 从文本生成向量表示
+- **向量数据库**
+  - 使用 PostgreSQL 和 pgvector
+  - 向量的保存和检索
 
-### 2.2 詳細設計
+### 2.2 详细设计
 
-#### 2.2.1 クラス設計
+#### 2.2.1 类设计
 
-##### `MCPServer`
+##### `ToolRegistry`（`server.py`）
+```python
+class ToolRegistry:
+    def register(tool: mcp_types.Tool, handler: Callable) -> None
+    # 同名工具重复注册时立即抛出 ValueError
+    def wire(server: LowLevelServer) -> None
+    # 在 SDK 服务器上安装唯一的 list_tools / call_tool 处理函数对
+```
+
+**关键函数（`server.py`）**:
+```python
+def create_sdk_server(name, version, description, rag_service, extra_module=None) -> LowLevelServer
+# 构建 ToolRegistry → 注册内置工具 → 桥接旧版插件 → 返回 SDK 服务器
+
+async def run_stdio(server: LowLevelServer) -> None
+# 以 stdio 传输方式运行
+
+def run_sse(server: LowLevelServer, host: str, port: int) -> None
+# 以 HTTP SSE 传输方式运行（调用 uvicorn）
+
+def create_sse_app(server: LowLevelServer) -> Starlette
+# 返回 Starlette ASGI 应用（/sse + /messages/ 端点）
+```
+
+##### `MCPServer`（`mcp_server.py`，旧版，保留兼容）
 ```python
 class MCPServer:
     def register_tool(name: str, description: str, input_schema: Dict[str, Any], handler: Callable) -> None
@@ -257,99 +286,99 @@ class RAGService:
     def get_document_count() -> int
 ```
 
-#### 2.2.2 データベーススキーマ
+#### 2.2.2 数据库架构
 
 ```sql
--- ドキュメントテーブル
+-- 文档表
 CREATE TABLE documents (
     id SERIAL PRIMARY KEY,
     document_id TEXT UNIQUE NOT NULL,
     content TEXT NOT NULL,
     file_path TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
-    embedding vector(1024),  -- multilingual-e5-largeの次元数
+    embedding vector(1024),  -- multilingual-e5-large 的维度数
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     metadata JSONB
 );
 
--- インデックス
+-- 索引
 CREATE INDEX idx_documents_embedding ON documents USING ivfflat (embedding vector_cosine_ops);
 ```
 
-### 2.3 インターフェース設計
+### 2.3 接口设计
 
-#### 2.3.1 MCPツール
+#### 2.3.1 MCP 工具
 
 ##### `search`
-ベクトル検索を行うツール
+进行向量检索的工具
 
-- 入力パラメータ:
-  - `query`: 検索クエリ
-  - `limit` (オプション): 返す結果の数（デフォルト: 5）
-  - `with_context` (オプション): 前後のチャンクも取得するかどうか（デフォルト: true）
-  - `context_size` (オプション): 前後に取得するチャンク数（デフォルト: 1）
-  - `full_document` (オプション): ドキュメント全体を取得するかどうか（デフォルト: false）
+- 输入参数：
+  - `query`：检索查询
+  - `limit`（可选）：返回结果的数量（默认：5）
+  - `with_context`（可选）：是否获取前后分块（默认：true）
+  - `context_size`（可选）：获取前后分块的数量（默认：1）
+  - `full_document`（可选）：是否获取文档全文（默认：false）
 
-- 出力:
-  - 検索結果のリスト（ファイルパスとチャンクインデックスでソート）
-    - ドキュメントID
-    - コンテンツ
-    - ファイルパス
-    - チャンクインデックス
-    - 関連度スコア
-    - メタデータ
-    - コンテキストフラグ（前後のチャンクの場合はTrue）
-    - 全文ドキュメントフラグ（ドキュメント全体の場合はTrue）
+- 输出：
+  - 检索结果列表（按文件路径和分块索引排序）
+    - 文档 ID
+    - 内容
+    - 文件路径
+    - 分块索引
+    - 相关度分数
+    - 元数据
+    - 上下文标志（前后分块时为 True）
+    - 全文文档标志（文档全文时为 True）
 
 ##### `get_document_count`
-インデックス内のドキュメント数を取得するツール
+获取索引中文档数量的工具
 
-- 入力パラメータ: なし
+- 输入参数：无
 
-- 出力:
-  - ドキュメント数
+- 输出：
+  - 文档数量
 
-#### 2.3.2 CLIコマンド
+#### 2.3.2 CLI 命令
 
 ##### `index`
-ドキュメントをインデックス化するコマンド
+为文档建立索引的命令
 
-- 引数:
-  - `--directory`, `-d`: インデックス化するドキュメントが含まれるディレクトリのパス（デフォルト: ./data/source）
-  - `--chunk-size`, `-s`: チャンクサイズ（文字数）（デフォルト: 500）
-  - `--chunk-overlap`, `-o`: チャンク間のオーバーラップ（文字数）（デフォルト: 100）
-  - `--incremental`, `-i`: 差分のみをインデックス化するかどうか（フラグ）
+- 参数：
+  - `--directory`, `-d`：包含要索引文档的目录路径（默认：./data/source）
+  - `--chunk-size`, `-s`：分块大小（字符数）（默认：500）
+  - `--chunk-overlap`, `-o`：分块间的重叠量（字符数）（默认：100）
+  - `--incremental`, `-i`：是否仅进行增量索引（标志）
 
 ##### `clear`
-インデックスをクリアするコマンド
+清除索引的命令
 
-- 引数: なし
+- 参数：无
 
 ##### `count`
-インデックス内のドキュメント数を取得するコマンド
+获取索引中文档数量的命令
 
-- 引数: なし
+- 参数：无
 
-### 2.4 セキュリティ設計
+### 2.4 安全设计
 
-- 環境変数で機密情報を管理（`.env`）
-  - PostgreSQL接続情報
-- 外部からの直接アクセスは制限（ローカル環境前提）
+- 使用环境变量管理敏感信息（`.env`）
+  - PostgreSQL 连接信息
+- 限制外部直接访问（以本地环境为前提）
 
-### 2.5 テスト設計
+### 2.5 测试设计
 
-- 単体テスト
-  - 各コンポーネントの機能テスト
-  - MCPサーバーの基本機能テスト
-- 統合テスト
-  - RAG機能の統合テスト
-  - MCPリクエストを模擬した動作確認
+- 单元测试
+  - 各组件的功能测试
+  - MCP 服务器的基本功能测试
+- 集成测试
+  - RAG 功能的集成测试
+  - 模拟 MCP 请求的运行确认
 
-### 2.6 開発環境・依存関係
+### 2.6 开发环境与依赖
 
 - Python 3.10+
-- PostgreSQL 14+（pgvectorエクステンション付き）
-- 必要なPythonパッケージ:
+- PostgreSQL 14+（带 pgvector 扩展）
+- 所需 Python 包：
   - `mcp[cli]`
   - `python-dotenv`
   - `psycopg2-binary`
@@ -358,112 +387,121 @@ CREATE INDEX idx_documents_embedding ON documents USING ivfflat (embedding vecto
   - `numpy`
   - `markitdown-mcp`
 
-### 2.7 ファイル構造
+### 2.7 文件结构
 
 ```
 mcp-rag-server/
 ├── data/
-│   ├── source/        # 原稿ファイル（階層構造対応）
-│   │   ├── markdown/  # マークダウンファイル
-│   │   ├── docs/      # ドキュメントファイル
-│   │   └── slides/    # プレゼンテーションファイル
-│   └── processed/     # 処理済みファイル（テキスト抽出済み）
-│       └── file_registry.json  # 処理済みファイルの情報（差分インデックス用）
-├── docs/              # プロジェクトドキュメント
-├── logs/              # ログファイル
-├── src/               # ソースコード
-└── tests/             # テストコード
+│   ├── source/        # 原始文档（支持层级结构）
+│   └── processed/     # 已处理文件与文件注册表
+├── docs/              # 项目文档
+├── logs/              # 日志文件
+├── src/
+│   ├── main.py                # 入口点（--transport stdio/sse）
+│   ├── server.py              # SDK 服务器工厂、ToolRegistry、传输函数
+│   ├── mcp_server.py          # 旧版 JSON-RPC over stdio（保留兼容）
+│   ├── rag_tools.py           # RAG 工具（旧版 + SDK 两种注册方式）
+│   ├── rag_service.py         # RAG 服务
+│   ├── document_processor.py  # 文档处理
+│   ├── embedding_generator.py # 嵌入向量生成
+│   └── vector_database.py     # PostgreSQL/pgvector 接口
+└── tests/
+    ├── test_mcp_server.py     # 旧版服务器单元测试
+    ├── test_server.py         # SDK 服务器单元测试（anyio）
+    ├── test_sse_transport.py  # SSE 传输集成测试（真实 HTTP 服务器）
+    └── ...
 ```
 
-### 2.8 開発工程
+### 2.8 开发计划
 
-| フェーズ | 内容 | 期間 |
+| 阶段 | 内容 | 时间 |
 |---------|------|------|
-| 要件定義 | 本仕様書作成 | 第1週 |
-| 設計 | アーキテクチャ・モジュール設計 | 第1週 |
-| 実装 | 各モジュールの開発 | 第2週 |
-| テスト | 単体・統合テスト | 第3週 |
-| リリース | ドキュメント整備・デプロイ対応 | 第3週 |
+| 需求定义 | 编写本规格书 | 第1周 |
+| 设计 | 架构与模块设计 | 第1周 |
+| 实现 | 各模块开发 | 第2周 |
+| 测试 | 单元与集成测试 | 第3周 |
+| 发布 | 文档整理与部署支持 | 第3周 |
 
-## 3. 実装ガイド
+## 3. 实现指南
 
-### 3.1 PostgreSQLとpgvectorのセットアップ
+### 3.1 设置 PostgreSQL 和 pgvector
 
-#### 3.1.1 Dockerを使用する場合
+#### 3.1.1 使用 Docker 的情况
 
 ```bash
-# pgvectorを含むPostgreSQLコンテナを起動
+# 启动包含 pgvector 的 PostgreSQL 容器
 docker run --name postgres-pgvector -e POSTGRES_PASSWORD=password -p 5432:5432 -d pgvector/pgvector:pg14
 ```
 
-#### 3.1.2 既存のPostgreSQLにpgvectorをインストールする場合
+#### 3.1.2 在现有 PostgreSQL 上安装 pgvector 的情况
 
 ```bash
-# pgvectorエクステンションをインストール
+# 安装 pgvector 扩展
 CREATE EXTENSION vector;
 ```
 
-### 3.2 環境変数の設定
+### 3.2 设置环境变量
 
-`.env`ファイルに以下の環境変数を設定:
+在 `.env` 文件中设置以下环境变量：
 
 ```
-# PostgreSQL接続情報
+# PostgreSQL 连接信息
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=password
 POSTGRES_DB=ragdb
 
-# ドキュメントディレクトリ
+# 文档目录
 SOURCE_DIR=./data/source
 PROCESSED_DIR=./data/processed
 
-# エンベディングモデル
+# 嵌入模型
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 ```
 
-### 3.3 実装の流れ
+### 3.3 实现流程
 
-1. 基本的なMCPサーバーの実装
-2. ドキュメント処理コンポーネントの実装
-   - 複数形式のファイル読み込み
-   - Markitdownを使用した変換
-   - 階層構造対応
-   - ファイルレジストリによる差分管理
-3. エンベディング生成コンポーネントの実装
-4. ベクトルデータベースコンポーネントの実装
-5. RAGサービスの実装
-6. MCPツールの実装と登録
-7. CLIコマンドの実装
-8. テストとデバッグ
+1. 实现基本的 MCP 服务器（旧版 `mcp_server.py`）
+2. 迁移到官方 SDK（`server.py`：`ToolRegistry`、`create_sdk_server`、传输函数）
+3. 实现文档处理组件
+   - 多格式文件读取
+   - 使用 Markitdown 进行转换
+   - 支持层级结构
+   - 通过文件注册表进行增量管理
+4. 实现嵌入向量生成组件（本地 + OpenAI 兼容 API）
+5. 实现向量数据库组件
+6. 实现 RAG 服务
+7. 实现和注册 MCP 工具（旧版 `register_rag_tools` + SDK 版 `register_rag_tools_sdk`）
+8. 实现 CLI 命令
+9. 测试和调试
 
-### 3.4 使用例
+### 3.4 使用示例
 
-#### 3.4.1 CLIによるインデックス化
+#### 3.4.1 使用 CLI 进行索引化
 
 ```bash
-# 全件インデックス化
+# 全量索引化
 python -m src.cli index
 
-# 差分インデックス化
+# 增量索引化
 python -m src.cli index -i
 ```
 
-#### 3.4.2 CLIによるインデックスのクリア
+#### 3.4.2 使用 CLI 清除索引
 
 ```bash
 python -m src.cli clear
 ```
 
-#### 3.4.3 MCPによる検索
+#### 3.4.3 使用 MCP 进行检索
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "search",
   "params": {
-    "query": "Pythonのジェネレータとは何ですか？",
+    "query": "Python 的生成器是什么？",
     "limit": 5,
     "with_context": true,
     "context_size": 1,
@@ -473,14 +511,14 @@ python -m src.cli clear
 }
 ```
 
-##### 前後のチャンクを取得する例
+##### 获取前后分块的示例
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "search",
   "params": {
-    "query": "Pythonのジェネレータとは何ですか？",
+    "query": "Python 的生成器是什么？",
     "limit": 3,
     "with_context": true,
     "context_size": 2
@@ -489,14 +527,14 @@ python -m src.cli clear
 }
 ```
 
-##### ドキュメント全体を取得する例
+##### 获取文档全文的示例
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "search",
   "params": {
-    "query": "Pythonのジェネレータとは何ですか？",
+    "query": "Python 的生成器是什么？",
     "limit": 3,
     "full_document": true
   },
@@ -504,7 +542,7 @@ python -m src.cli clear
 }
 ```
 
-#### 3.4.4 MCPによるドキュメント数の取得
+#### 3.4.4 使用 MCP 获取文档数量
 
 ```json
 {

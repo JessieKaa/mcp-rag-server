@@ -2,7 +2,7 @@
 """
 MCP RAG Server
 
-Model Context Protocol (MCP)に準拠したRAG機能を持つPythonサーバー
+符合 Model Context Protocol (MCP) 标准的 RAG 功能 Python 服务器
 """
 
 import sys
@@ -10,37 +10,37 @@ import os
 import argparse
 import importlib
 import logging
+import anyio
 from dotenv import load_dotenv
 
-from .mcp_server import MCPServer
-from .rag_tools import register_rag_tools, create_rag_service_from_env
+from .rag_tools import create_rag_service_from_env
+from .server import create_sdk_server, run_stdio, run_sse
 
 
 def main():
     """
-    メイン関数
+    主函数
 
-    コマンドライン引数を解析し、MCPサーバーを起動します。
+    解析命令行参数并启动 MCP 服务器。
     """
-    # コマンドライン引数の解析
     parser = argparse.ArgumentParser(
-        description="MCP RAG Server - Model Context Protocol (MCP)に準拠したRAG機能を持つPythonサーバー"
+        description="MCP RAG Server - 符合 Model Context Protocol (MCP) 标准的 RAG 功能 Python 服务器"
     )
-    parser.add_argument("--name", default="mcp-rag-server", help="サーバー名")
-    parser.add_argument("--version", default="0.1.0", help="サーバーバージョン")
-    parser.add_argument("--description", default="MCP RAG Server - 複数形式のドキュメントのRAG検索", help="サーバーの説明")
-    parser.add_argument("--module", help="追加のツールモジュール（例: myapp.tools）")
+    parser.add_argument("--name", default="mcp-rag-server", help="服务器名称")
+    parser.add_argument("--version", default="0.1.0", help="服务器版本")
+    parser.add_argument("--description", default="MCP RAG Server - 支持多格式文档的 RAG 检索", help="服务器描述")
+    parser.add_argument("--module", help="额外的工具模块（例：myapp.tools）")
+    parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio", help="传输方式（默认：stdio）")
+    parser.add_argument("--host", default="0.0.0.0", help="SSE 服务器监听地址（默认：0.0.0.0）")
+    parser.add_argument("--port", type=int, default=8000, help="SSE 服务器监听端口（默认：8000）")
     args = parser.parse_args()
 
-    # 環境変数の読み込み
     load_dotenv()
 
-    # ディレクトリの作成
     os.makedirs("logs", exist_ok=True)
     os.makedirs(os.environ.get("SOURCE_DIR", "data/source"), exist_ok=True)
     os.makedirs(os.environ.get("PROCESSED_DIR", "data/processed"), exist_ok=True)
 
-    # ロギングの設定
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -52,36 +52,39 @@ def main():
     logger = logging.getLogger("main")
 
     try:
-        # MCPサーバーの作成
-        server = MCPServer()
-
-        # RAGサービスの作成と登録
-        logger.info("RAGサービスを初期化しています...")
+        logger.info("正在初始化 RAG 服务...")
         rag_service = create_rag_service_from_env()
-        register_rag_tools(server, rag_service)
-        logger.info("RAGツールを登録しました")
+        logger.info("RAG 服务已初始化")
 
-        # 追加のツールモジュールがある場合は読み込む
+        loaded_module = None
         if args.module:
             try:
-                module = importlib.import_module(args.module)
-                if hasattr(module, "register_tools"):
-                    module.register_tools(server)
-                    print(f"モジュール '{args.module}' からツールを登録しました", file=sys.stderr)
-                else:
-                    print(f"警告: モジュール '{args.module}' に register_tools 関数が見つかりません", file=sys.stderr)
+                loaded_module = importlib.import_module(args.module)
+                logger.info(f"已加载模块 '{args.module}'")
             except ImportError as e:
-                print(f"警告: モジュール '{args.module}' の読み込みに失敗しました: {str(e)}", file=sys.stderr)
+                logger.warning(f"加载模块 '{args.module}' 失败：{str(e)}")
 
-        # MCPサーバーの起動
-        server.start(args.name, args.version, args.description)
+        sdk_server = create_sdk_server(
+            name=args.name,
+            version=args.version,
+            description=args.description,
+            rag_service=rag_service,
+            extra_module=loaded_module,
+        )
+        logger.info("SDK 服务器已创建")
+
+        if args.transport == "stdio":
+            anyio.run(run_stdio, sdk_server)
+        else:
+            logger.info(f"SSE 服务器启动中，监听 {args.host}:{args.port}")
+            run_sse(sdk_server, args.host, args.port)
 
     except KeyboardInterrupt:
-        print("サーバーを終了します。", file=sys.stderr)
+        print("服务器正在退出。", file=sys.stderr)
         sys.exit(0)
 
     except Exception as e:
-        print(f"エラーが発生しました: {str(e)}", file=sys.stderr)
+        print(f"发生错误：{str(e)}", file=sys.stderr)
         sys.exit(1)
 
 

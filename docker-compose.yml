@@ -1,0 +1,61 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ragdb}
+    volumes:
+      - ./docker_runtime/pgdata:/var/lib/postgresql/data
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app-local:
+    profiles: ["local"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # ports:
+    #   - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./docker_runtime/data/source:/app/data/source
+      - ./docker_runtime/data/processed:/app/data/processed
+      - model-cache:/root/.cache/huggingface
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app-openai:
+    profiles: ["openai"]
+    build:
+      context: .
+      dockerfile: Dockerfile.openai
+    ports:
+      - "8899:8000"
+    volumes:
+      - ./src:/app/src
+      - ./docker_runtime/data/source:/app/data/source
+      - ./docker_runtime/data/processed:/app/data/processed
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  model-cache:

@@ -1,0 +1,23 @@
+# MCP RAG Server — OpenAI API 版本（轻量，不含 torch / sentence-transformers）
+FROM python:3.11-slim
+
+# uv 公式インストーラー
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+WORKDIR /app
+
+# 依赖裁剪：临时移除 sentence-transformers / sentencepiece / numpy
+# （numpy 会被其他包作为间接依赖按需安装）
+COPY pyproject.toml uv.lock ./
+RUN sed -i '/sentence-transformers/d; /sentencepiece/d; /numpy/d' pyproject.toml \
+    && uv sync --extra openai --no-install-project
+
+# アプリケーションソースをコピー
+COPY src/ src/
+
+# データディレクトリを作成
+RUN mkdir -p data/source data/processed logs
+
+EXPOSE 8000
+
+CMD ["uv", "run", "python", "-m", "src.main", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]

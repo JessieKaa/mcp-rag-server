@@ -1,208 +1,390 @@
 # MCP RAG Server
 
-MCP RAG Serverは、Model Context Protocol (MCP)に準拠したRAG（Retrieval-Augmented Generation）機能を持つPythonサーバーです。マークダウン、テキスト、パワーポイント、PDFなど複数の形式のドキュメントをデータソースとして、multilingual-e5-largeモデルを使用してインデックス化し、ベクトル検索によって関連情報を取得する機能を提供します。
+MCP RAG Server 是一个符合 Model Context Protocol (MCP) 标准的 RAG（Retrieval-Augmented Generation）功能 Python 服务器。它以多种格式的文档（如 Markdown、文本、PowerPoint、PDF 等）作为数据源，使用 multilingual-e5-large 模型进行索引，并提供通过向量检索获取相关信息的功能。
 
-## 概要
+## 概述
 
-このプロジェクトは、MCPサーバーの基本的な実装に加えて、RAG機能を提供します。複数形式のドキュメントをインデックス化し、自然言語クエリに基づいて関連情報を検索することができます。
+本项目在 MCP 服务器的基本实现之上，还提供了 RAG 功能。它可以对多种格式的文档进行索引，并根据自然语言查询检索相关信息。
 
-## 機能
+## 功能
 
-- **MCPサーバーの基本実装**
-  - JSON-RPC over stdioベースで動作
-  - ツールの登録と実行のためのメカニズム
-  - エラーハンドリングとロギング
+- **MCP 服务器基本实现**
+  - 基于官方 MCP Python SDK 构建
+  - 支持 JSON-RPC over **stdio**（默认）和 **HTTP SSE** 两种传输方式
+  - 提供工具注册和执行机制
+  - 错误处理和日志记录
 
-- **RAG機能**
-  - 複数形式のドキュメント（マークダウン、テキスト、パワーポイント、PDF）の読み込みと解析
-  - 階層構造を持つソースディレクトリに対応
-  - markitdownライブラリを使用したパワーポイントやPDFからのマークダウン変換
-  - 選択可能なエンベディングモデル（multilingual-e5-large、ruriなど）を使用したエンベディング生成
-  - PostgreSQLのpgvectorを使用したベクトルデータベース
-  - ベクトル検索による関連情報の取得
-  - 前後のチャンク取得機能（コンテキストの連続性を確保）
-  - ドキュメント全文取得機能（完全なコンテキストを提供）
-  - 差分インデックス化機能（新規・変更ファイルのみを処理）
+- **RAG 功能**
+  - 支持多种格式文档（Markdown、文本、PowerPoint、PDF）的读取和解析
+  - 支持具有层级结构的源目录
+  - 使用 markitdown 库将 PowerPoint 和 PDF 转换为 Markdown
+  - 使用可选的嵌入模型（multilingual-e5-large、ruri 等）生成嵌入向量
+  - 使用 PostgreSQL 的 pgvector 实现向量数据库
+  - 通过向量检索获取相关信息
+  - 获取前后分块功能（确保上下文连续性）
+  - 获取文档全文功能（提供完整上下文）
+  - 增量索引功能（仅处理新增和变更的文件）
 
-- **ツール**
-  - ベクトル検索ツール（MCP）
-  - ドキュメント数取得ツール（MCP）
-  - インデックス管理ツール（CLI）
+- **工具**
+  - 向量检索工具（MCP）
+  - 文档数量获取工具（MCP）
+  - 索引管理工具（CLI）
 
 ## 前提条件
 
-- Python 3.10以上
-- PostgreSQL 14以上（pgvectorエクステンション付き）
+- Python 3.10 以上
+- PostgreSQL 14 以上（带 pgvector 扩展）
 
-## インストール
+## 安装
 
-### 依存関係のインストール
+### 安装依赖
 
 ```bash
-# uvがインストールされていない場合は先にインストール
+# 如果尚未安装 uv，请先安装
 # pip install uv
 
-# 依存関係のインストール
+# 基本安装（包含本地模型）
 uv sync
+
+# 如果也要使用 OpenAI 兼容 API
+uv sync --extra openai
 ```
 
-### PostgreSQLとpgvectorのセットアップ
+### 设置 PostgreSQL 和 pgvector
 
-#### Dockerを使用する場合
+#### 使用 Docker 的情况
 
 ```bash
-# pgvectorを含むPostgreSQLコンテナを起動
+# 启动包含 pgvector 的 PostgreSQL 容器
 docker run --name postgres-pgvector -e POSTGRES_PASSWORD=password -p 5432:5432 -d pgvector/pgvector:pg17
 ```
 
-#### データベースの作成
+#### 创建数据库
 
-PostgreSQLコンテナを起動した後、以下のコマンドでデータベースを作成します：
+启动 PostgreSQL 容器后，使用以下命令创建数据库：
 
 ```bash
-# ragdbデータベースの作成
+# 创建 ragdb 数据库
 docker exec -it postgres-pgvector psql -U postgres -c "CREATE DATABASE ragdb;"
 ```
 
-#### 既存のPostgreSQLにpgvectorをインストールする場合
+#### 在现有 PostgreSQL 上安装 pgvector 的情况
 
 ```sql
--- pgvectorエクステンションをインストール
+-- 安装 pgvector 扩展
 CREATE EXTENSION vector;
 ```
 
-### 環境変数の設定
+### 设置环境变量
 
-`.env`ファイルを作成し、以下の環境変数を設定します：
+创建 `.env` 文件，并设置以下环境变量：
 
 ```
-# PostgreSQL接続情報
+# PostgreSQL 连接信息
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=password
 POSTGRES_DB=ragdb
 
-# ドキュメントディレクトリ
+# 文档目录
 SOURCE_DIR=./data/source
 PROCESSED_DIR=./data/processed
 
-# エンベディングモデル設定
+# 嵌入模型设置
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 EMBEDDING_DIM=1024
 EMBEDDING_PREFIX_QUERY="query: "
 EMBEDDING_PREFIX_EMBEDDING="passage: "
 ```
 
-## エンベディングモデルの設定
+## Docker 部署
 
-このサーバーでは、環境変数でエンベディングモデルを選択できます。
+仓库提供两个 Dockerfile 和一个开发用 `docker-compose.yml`：
 
-### サポートされているモデル
+| 文件 | 用途 | 镜像大小 |
+|---|---|---|
+| `Dockerfile` | 本地模型版（含 sentence-transformers / torch）| ~3 GB |
+| `Dockerfile.openai` | OpenAI 兼容 API 版（裁剪重型依赖）| ~300 MB |
+| `docker-compose.yml` | 开发环境（pgvector DB + 通过 profile 选择 app）| — |
 
-#### multilingual-e5-large（デフォルト）
+### 快速开始
+
+```bash
+# 1. 从模板创建 .env（POSTGRES_HOST 等已预设为 compose 服务名）
+cp .env.docker .env
+# 按需编辑 EMBEDDING_* / RERANKER_* 配置
+
+# 2. 启动（本地模型版）
+docker compose --profile local up --build -d
+
+# 或启动（OpenAI API 版）
+docker compose --profile openai up --build -d
+```
+
+启动后 SSE 端点映射到宿主机 `8899:8000`。源码目录 `./src` 挂载进容器，修改代码无需重建镜像。
+
+### 索引与检索
+
+```bash
+# 在容器内执行索引
+docker compose --profile openai exec app-openai uv run python -m src.cli index
+
+# 文档数量
+docker compose --profile openai exec app-openai uv run python -m src.cli count
+```
+
+文档放入 `docker_runtime/data/source/`（root 权限，用 `docker cp` 写入）或挂载到其他路径。
+
+### 直接构建镜像
+
+不使用 compose 时，可直接构建：
+
+```bash
+docker build -t mcp-rag-server:local .
+docker build -f Dockerfile.openai -t mcp-rag-server:openai .
+docker run --rm -p 8000:8000 --env-file .env mcp-rag-server:openai
+```
+
+## 嵌入模型设置
+
+本服务器可以通过环境变量选择嵌入模型和提供者。
+
+### 环境变量一览
+
+| 变量名 | 默认值 | 说明 |
+|--------|-----------|------|
+| `EMBEDDING_PROVIDER` | `local` | 提供者选择：`local`（本地模型）或 `openai`（OpenAI 兼容 API） |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | 模型名称。env 的值优先于参数 |
+| `EMBEDDING_DIM` | `1024` | 向量维度数。根据模型输出维度设置 |
+| `EMBEDDING_PREFIX_QUERY` | `""` | 添加到检索查询的前缀 |
+| `EMBEDDING_PREFIX_EMBEDDING` | `""` | 添加到索引对象文档的前缀 |
+| `EMBEDDING_API_KEY` | *(无)* | OpenAI 模式用 API 密钥。使用官方端点时必须设置 |
+| `EMBEDDING_BASE_URL` | *(无)* | OpenAI 模式用基础 URL。未设置时使用官方 OpenAI 端点 |
+| `EMBEDDING_API_BATCH_SIZE` | `64` | OpenAI 模式用批处理大小（一次 API 调用包含的最大文本数）|
+
+### 提供者：local（默认）
+
+使用 `sentence-transformers` 进行本地推理。首次启动时会下载模型。
+
+#### multilingual-e5-large（默认）
+
 ```env
+EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL=intfloat/multilingual-e5-large
 EMBEDDING_DIM=1024
 EMBEDDING_PREFIX_QUERY="query: "
 EMBEDDING_PREFIX_EMBEDDING="passage: "
 ```
 
-#### cl-nagoya/ruri-v3-30m
+#### cl-nagoya/ruri-v3-30m（日语专用、轻量）
+
 ```env
+EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL=cl-nagoya/ruri-v3-30m
 EMBEDDING_DIM=256
 EMBEDDING_PREFIX_QUERY="検索クエリ: "
 EMBEDDING_PREFIX_EMBEDDING="検索文書: "
 ```
 
-### プレフィックスについて
+### 提供者：openai（OpenAI 兼容 API）
 
-多くのエンベディングモデル（特にE5系）では、テキストの種類に応じてプレフィックスを付けることで性能が向上します：
+使用 OpenAI 或兼容 API（Xinference / vLLM / LocalAI / Ollama 等）。无需本地 GPU/CPU 推理。
 
-- **検索クエリ用**: `EMBEDDING_PREFIX_QUERY` - ユーザーの検索クエリに自動で追加
-- **文書用**: `EMBEDDING_PREFIX_EMBEDDING` - インデックス化される文書に自動で追加
-
-プレフィックスは自動で処理されるため、MCPクライアントは意識する必要がありません。
-
-### モデル変更時の注意
-
-エンベディングモデルを変更した場合は、ベクトル次元が変わる可能性があるため、既存のインデックスをクリアして再作成してください：
+#### 安装
 
 ```bash
+uv sync --extra openai
+```
+
+#### 使用官方 OpenAI 的情况
+
+`EMBEDDING_API_KEY` 是必需的。无需设置 `EMBEDDING_BASE_URL`。
+
+```env
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIM=1536
+EMBEDDING_API_KEY=sk-...
+```
+
+#### 使用自托管兼容服务的情况
+
+设置 `EMBEDDING_BASE_URL` 后会被判定为自托管模式，`EMBEDDING_API_KEY` 可以省略。
+
+```env
+EMBEDDING_PROVIDER=openai
+EMBEDDING_BASE_URL=http://localhost:9997/v1
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIM=1024
+# EMBEDDING_API_KEY 可省略（对于不需要认证的服务）
+```
+
+如果 `EMBEDDING_BASE_URL` 明确设置为 `https://api.openai.com/v1`，则判定为官方端点，需要 `EMBEDDING_API_KEY`。
+
+#### 调整批处理大小
+
+在为大量文档建立索引时，如果遇到 API 速率限制，请减小批处理大小。
+
+```env
+EMBEDDING_API_BATCH_SIZE=16
+```
+
+### 关于前缀
+
+对于 E5 系列、Ruri 系列等模型，根据文本类型添加相应的前缀可以提高检索精度。
+
+- `EMBEDDING_PREFIX_QUERY` — 自动添加到检索查询（例：`"query: "`）
+- `EMBEDDING_PREFIX_EMBEDDING` — 自动添加到索引对象文档（例：`"passage: "`）
+
+前缀由 `EmbeddingGenerator` 内部处理，MCP 客户端无需特别处理。在 OpenAI 模式下使用 E5 系列以外的模型时，请将前缀设置为空（默认为空）。
+
+### 更改提供者或模型时的注意事项
+
+更改提供者或模型可能会导致向量维度发生变化。由于维度不匹配会导致现有索引无法使用，因此**必须**清除后重新创建。
+
+```bash
+# 1. 清除索引
 python -m src.cli clear
+
+# 2. 更新 .env 为新的模型设置后重新索引
 python -m src.cli index
 ```
 
-## 使い方
+如果维度不匹配，在首次调用 `generate_embedding` 时会出现以下错误：
 
-### MCPサーバーの起動
+```
+ValueError: Embedding dimension mismatch (generate_embedding): got 1536, expected EMBEDDING_DIM=1024.
+Run `python -m src.cli clear` then re-index after updating EMBEDDING_DIM.
+```
 
-#### uvを使用する場合（推奨）
+
+## 重排序（Reranker）
+
+可选的两阶段检索精排功能。开启后，会先用向量检索召回 `limit × RERANK_FACTOR` 个候选，再用 CrossEncoder 对 (query, passage) 对打分并按相关性重排。
+
+### 环境变量
+
+| 变量名 | 默认值 | 说明 |
+|--------|-----------|------|
+| `RERANKER_PROVIDER` | `none` | `none`（禁用）/ `local`（本地 CrossEncoder）/ `openai`（兼容 rerank API）|
+| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | 模型名称 |
+| `RERANK_FACTOR` | `3` | 候选取样倍数（先召回 limit × factor 个候选再精排）|
+| `RERANKER_BASE_URL` | *(无)* | OpenAI 模式必填，如 `https://api.siliconflow.cn/v1` |
+| `RERANKER_API_KEY` | *(无)* | OpenAI 模式 API 密钥（部分自托管服务可省略）|
+
+### 提供者：local
+
+使用 `sentence-transformers` 的 CrossEncoder，首次启动会下载模型。
+
+```env
+RERANKER_PROVIDER=local
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANK_FACTOR=3
+```
+
+### 提供者：openai
+
+调用 OpenAI 兼容的 `/v1/rerank` 端点，适配 Jina / Cohere / SiliconFlow / Xinference 等服务。需要 `httpx`（已随 `openai` extra 安装）。
+
+```env
+RERANKER_PROVIDER=openai
+RERANKER_BASE_URL=https://api.siliconflow.cn/v1
+RERANKER_API_KEY=sk-...
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+
+## 使用方法
+
+### 启动 MCP 服务器
+
+#### stdio 模式（默认，适用于 Claude Desktop / Cline 等 MCP 主机）
 
 ```bash
+# 使用 uv（推荐）
 uv run python -m src.main
-```
 
-オプションを指定する場合：
-
-```bash
+# 指定服务器名称等选项
 uv run python -m src.main --name "my-rag-server" --version "1.0.0" --description "My RAG Server"
-```
 
-#### 通常のPythonを使用する場合
-
-```bash
+# 使用普通 Python
 python -m src.main
 ```
 
-### コマンドラインツール（CLI）の使用方法
+#### HTTP SSE 模式（适用于容器化部署、多客户端共享等场景）
 
-インデックスのクリアとインデックス化を行うためのコマンドラインツールが用意されています。
+```bash
+# 在本地 8000 端口启动
+uv run python -m src.main --transport sse --port 8000
 
-#### ヘルプの表示
+# 指定监听地址
+uv run python -m src.main --transport sse --host 0.0.0.0 --port 8000
+```
+
+启动后，客户端可通过以下端点连接：
+- `GET  http://localhost:8000/sse` — 建立 SSE 连接，接收 JSON-RPC 响应
+- `POST http://localhost:8000/messages/?session_id=<id>` — 发送 JSON-RPC 请求
+
+#### 可用选项一览
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `--transport` | `stdio` | 传输方式：`stdio` 或 `sse` |
+| `--host` | `0.0.0.0` | SSE 模式的监听地址 |
+| `--port` | `8000` | SSE 模式的监听端口 |
+| `--name` | `mcp-rag-server` | 服务器名称 |
+| `--version` | `0.1.0` | 版本号 |
+| `--description` | *(默认说明)* | 服务器描述 |
+| `--module` | *(无)* | 额外工具模块（如 `myapp.tools`） |
+
+### 命令行工具（CLI）的使用方法
+
+提供了用于清除索引和建立索引的命令行工具。
+
+#### 显示帮助
 
 ```bash
 python -m src.cli --help
 ```
 
-#### インデックスのクリア
+#### 清除索引
 
 ```bash
 python -m src.cli clear
 ```
 
-#### ドキュメントのインデックス化
+#### 为文档建立索引
 
 ```bash
-# デフォルト設定でインデックス化（./data/source ディレクトリ）
+# 使用默认设置建立索引（./data/source 目录）
 python -m src.cli index
 
-# 特定のディレクトリをインデックス化
+# 为特定目录建立索引
 python -m src.cli index --directory ./path/to/documents
 
-# チャンクサイズとオーバーラップを指定してインデックス化
+# 指定分块大小和重叠量建立索引
 python -m src.cli index --directory ./data/source --chunk-size 300 --chunk-overlap 50
-# または短い形式で
+# 或使用简短形式
 python -m src.cli index -d ./data/source -s 300 -o 50
 
-# 差分インデックス化（新規・変更ファイルのみを処理）
+# 增量索引（仅处理新增和变更的文件）
 python -m src.cli index --incremental
-# または短い形式で
+# 或使用简短形式
 python -m src.cli index -i
 ```
 
-#### インデックス内のドキュメント数の取得
+#### 获取索引中的文档数量
 
 ```bash
 python -m src.cli count
 ```
 
-### MCPホストでの設定
+### 在 MCP 主机中的设置
 
-MCPホスト（Claude Desktop、Cline、Cursorなど）でこのサーバーを使用するには、以下のような設定を行います。設定するjsonファイルについては、各MCPホストの　ドキュメントを参照してください。
+要在 MCP 主机（Claude Desktop、Cline、Cursor 等）中使用本服务器，请进行如下设置。关于设置用的 JSON 文件，请参考各 MCP 主机的文档。
 
-#### 設定例
+#### stdio 模式（推荐）
 
 ```json
 {
@@ -222,39 +404,50 @@ MCPホスト（Claude Desktop、Cline、Cursorなど）でこのサーバーを�
 }
 ```
 
-#### 設定のポイント
+#### SSE 模式（服务器单独部署的情况）
 
-- `command`: `uv`（推奨）または`python`
-- `args`: 実行引数の配列
-- `/path/to/mcp-rag-server`: このリポジトリの実際のパスに置き換えてください
+先单独启动服务器：
 
-#### uvを使用しない場合
+```bash
+uv run python -m src.main --transport sse --port 8000
+```
 
-uvがインストールされていない環境では、通常のPythonを使用できます：
+然后在 MCP 主机中指定 SSE 端点（各主机的具体写法可能有所不同）：
+
+```json
+{
+  "mcpServers": {
+    "mcp-rag-server": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+#### 不使用 uv 的情况
+
+在未安装 uv 的环境中，可以使用普通 Python（stdio 模式）：
 
 ```json
 {
   "command": "python",
-  "args": [
-    "-m",
-    "src.main"
-  ],
+  "args": ["-m", "src.main"],
   "cwd": "/path/to/mcp-rag-server"
 }
 ```
 
-## RAGツールの使用方法
+## RAG 工具的使用方法
 
 ### search
 
-ベクトル検索を行います。
+进行向量检索。
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "search",
   "params": {
-    "query": "Pythonのジェネレータとは何ですか？",
+    "query": "Python 的生成器是什么？",
     "limit": 5,
     "with_context": true,
     "context_size": 1,
@@ -264,36 +457,36 @@ uvがインストールされていない環境では、通常のPythonを使用
 }
 ```
 
-#### パラメータの説明
+#### 参数说明
 
-- `query`: 検索クエリ（必須）
-- `limit`: 返す結果の数（デフォルト: 5）
-- `with_context`: 前後のチャンクも取得するかどうか（デフォルト: true）
-- `context_size`: 前後に取得するチャンク数（デフォルト: 1）
-- `full_document`: ドキュメント全体を取得するかどうか（デフォルト: false）
+- `query`：检索查询（必需）
+- `limit`：返回结果的数量（默认：5）
+- `with_context`：是否获取前后分块（默认：true）
+- `context_size`：获取前后分块的数量（默认：1）
+- `full_document`：是否获取文档全文（默认：false）
 
-#### 検索結果の改善
+#### 检索结果的改进
 
-このツールは以下の機能により、より良い検索結果を提供します：
+本工具通过以下功能提供更好的检索结果：
 
-1. **前後のチャンク取得機能**：
-   - 検索でヒットしたチャンクの前後のチャンクも取得して結果に含めます
-   - `with_context`パラメータで有効/無効を切り替え可能
-   - `context_size`パラメータで前後に取得するチャンク数を調整可能
+1. **获取前后分块功能**：
+   - 获取检索命中分块的前后分块并包含在结果中
+   - 可通过 `with_context` 参数启用/禁用
+   - 可通过 `context_size` 参数调整获取前后分块的数量
 
-2. **ドキュメント全文取得機能**：
-   - 検索でヒットしたドキュメントの全文を取得して結果に含めます
-   - `full_document`パラメータで有効/無効を切り替え可能
-   - 特に短いドキュメントや全体の文脈が重要なドキュメントを扱う場合に有用
+2. **获取文档全文功能**：
+   - 获取检索命中文档的全文并包含在结果中
+   - 可通过 `full_document` 参数启用/禁用
+   - 特别适用于处理短文档或需要完整上下文的文档
 
-3. **結果の整形改善**：
-   - 検索結果をファイルごとにグループ化
-   - 「検索ヒット」「前後のコンテキスト」「ドキュメント全文」を視覚的に区別
-   - チャンクインデックスでソートして文書の流れを維持
+3. **结果格式改进**：
+   - 按文件分组检索结果
+   - 视觉上区分"检索命中"、"前后上下文"和"文档全文"
+   - 按分块索引排序以保持文档的连贯性
 
 ### get_document_count
 
-インデックス内のドキュメント数を取得します。
+获取索引中的文档数量。
 
 ```json
 {
@@ -304,190 +497,193 @@ uvがインストールされていない環境では、通常のPythonを使用
 }
 ```
 
-## 使用例
+## 使用示例
 
-1. ドキュメントファイルを `data/source` ディレクトリに配置します。サポートされるファイル形式は以下の通りです：
-   - マークダウン（.md, .markdown）
-   - テキスト（.txt）
-   - パワーポイント（.ppt, .pptx）
+1. 将文档文件放入 `data/source` 目录。支持的文件格式如下：
+   - Markdown（.md, .markdown）
+   - 文本（.txt）
+   - PowerPoint（.ppt, .pptx）
    - Word（.doc, .docx）
    - PDF（.pdf）
 
-2. CLIコマンドを使用してドキュメントをインデックス化します：
+2. 使用 CLI 命令为文档建立索引：
    ```bash
-   # 初回は全件インデックス化
+   # 首次建立全量索引
    python -m src.cli index
 
-   # 以降は差分インデックス化で効率的に更新
+   # 之后使用增量索引高效更新
    python -m src.cli index -i
    ```
 
-3. MCPサーバーを起動します：
+3. 启动 MCP 服务器：
    ```bash
    uv run python -m src.main
    ```
 
-4. `search`ツールを使用して検索を行います。
+4. 使用 `search` 工具进行检索。
 
-## バックアップと復元
+## 备份与恢复
 
-インデックス化したデータベースを別のPCで使用するには、以下の手順でバックアップと復元を行います。
+要在其他 PC 上使用已建立索引的数据库，请按以下步骤进行备份和恢复。
 
-### 最小限のバックアップ（PostgreSQLデータベースのみ）
+### 最小备份（仅 PostgreSQL 数据库）
 
-単純に他のPCでRAG検索機能を使いたいだけなら、PostgreSQLデータベースのバックアップだけで十分です。ベクトル化されたデータはすべてデータベースに保存されているためです。
+如果只是想在其他 PC 上使用 RAG 检索功能，只需备份 PostgreSQL 数据库即可。因为所有向量化数据都存储在数据库中。
 
-#### PostgreSQLデータベースのバックアップ
+#### PostgreSQL 数据库备份
 
-PostgreSQLデータベースをバックアップするには、Dockerコンテナ内で`pg_dump`コマンドを使用します：
+要备份 PostgreSQL 数据库，请在 Docker 容器内使用 `pg_dump` 命令：
 
 ```bash
-# Dockerコンテナ内でデータベースをバックアップ
+# 在 Docker 容器内备份数据库
 docker exec -it postgres-pgvector pg_dump -U postgres -d ragdb -F c -f /tmp/ragdb_backup.dump
 
-# バックアップファイルをコンテナからホストにコピー
+# 将备份文件从容器复制到主机
 docker cp postgres-pgvector:/tmp/ragdb_backup.dump ./ragdb_backup.dump
 ```
 
-これにより、PostgreSQLデータベースのバックアップファイル（例：239MB）がカレントディレクトリに作成されます。
+这样会在当前目录创建 PostgreSQL 数据库的备份文件（例如：239MB）。
 
-#### 最小限の復元手順
+#### 最小恢复步骤
 
-1. 新しいPCでPostgreSQLとpgvectorをセットアップします：
+1. 在新 PC 上设置 PostgreSQL 和 pgvector：
 
 ```bash
-# Dockerを使用する場合
+# 使用 Docker 的情况
 docker run --name postgres-pgvector -e POSTGRES_PASSWORD=password -p 5432:5432 -d pgvector/pgvector:pg17
 
-# データベースを作成
+# 创建数据库
 docker exec -it postgres-pgvector psql -U postgres -c "CREATE DATABASE ragdb;"
 ```
 
-2. バックアップからデータベースを復元します：
+2. 从备份恢复数据库：
 
 ```bash
-# バックアップファイルをコンテナにコピー
+# 将备份文件复制到容器
 docker cp ./ragdb_backup.dump postgres-pgvector:/tmp/ragdb_backup.dump
 
-# コンテナ内でデータベースを復元
+# 在容器内恢复数据库
 docker exec -it postgres-pgvector pg_restore -U postgres -d ragdb -c /tmp/ragdb_backup.dump
 ```
 
-3. 環境設定を確認します：
+3. 确认环境设置：
 
-新しいPCでは、`.env`ファイルのPostgreSQL接続情報が正しく設定されていることを確認してください。
+在新 PC 上，请确认 `.env` 文件中的 PostgreSQL 连接信息设置正确。
 
-4. 動作確認：
+4. 验证运行：
 
 ```bash
 python -m src.cli count
 ```
 
-これにより、インデックス内のドキュメント数が表示されます。元のPCと同じ数が表示されれば、正常に復元されています。
+这将显示索引中的文档数量。如果显示的数量与原 PC 相同，则表示恢复成功。
 
-### 完全バックアップ（オプション）
+### 完全备份（可选）
 
-将来的に新しいドキュメントを追加する予定がある場合や、差分インデックス化機能を使用したい場合は、以下の追加バックアップも行うと良いでしょう：
+如果将来计划添加新文档，或需要使用增量索引功能，建议进行以下额外备份：
 
-#### 処理済みドキュメントのバックアップ
+#### 备份已处理的文档
 
-処理済みドキュメントディレクトリをバックアップします：
+备份已处理文档目录：
 
 ```bash
-# 処理済みドキュメントディレクトリをZIPファイルにバックアップ
+# 将已处理文档目录备份为 ZIP 文件
 zip -r processed_data_backup.zip data/processed/
 ```
 
-#### 環境設定ファイルのバックアップ
+#### 备份环境设置文件
 
-`.env`ファイルをバックアップします：
+备份 `.env` 文件：
 
 ```bash
-# .envファイルをコピー
+# 复制 .env 文件
 cp .env env_backup.txt
 ```
 
-#### 完全復元手順
+#### 完全恢复步骤
 
 1. 前提条件
 
-新しいPCには以下のソフトウェアがインストールされている必要があります：
+新 PC 上需要安装以下软件：
 
-- Python 3.10以上
-- PostgreSQL 14以上（pgvectorエクステンション付き）
-- mcp-rag-serverのコードベース
+- Python 3.10 以上
+- PostgreSQL 14 以上（带 pgvector 扩展）
+- mcp-rag-server 代码库
 
-2. PostgreSQLデータベースを上記の「最小限の復元手順」で復元します。
+2. 按上述"最小恢复步骤"恢复 PostgreSQL 数据库。
 
-3. 処理済みドキュメントを復元します：
+3. 恢复已处理的文档：
 
 ```bash
-# ZIPファイルを展開
+# 解压 ZIP 文件
 unzip processed_data_backup.zip -d /path/to/mcp-rag-server/
 ```
 
-4. 環境設定ファイルを復元します：
+4. 恢复环境设置文件：
 
 ```bash
-# .envファイルを復元
+# 恢复 .env 文件
 cp env_backup.txt /path/to/mcp-rag-server/.env
 ```
 
-必要に応じて、新しいPC環境に合わせて`.env`ファイルの設定（特にPostgreSQL接続情報）を編集します。
+根据需要，编辑 `.env` 文件的设置（特别是 PostgreSQL 连接信息）以适应新 PC 环境。
 
-5. 動作確認：
+5. 验证运行：
 
 ```bash
 python -m src.cli count
 ```
 
-### 注意点
+### 注意事项
 
-- PostgreSQLのバージョンとpgvectorのバージョンは、元のPCと新しいPCで互換性がある必要があります。
-- 大量のデータがある場合は、バックアップと復元に時間がかかる場合があります。
-- 新しいPCでは、必要なPythonパッケージ（`sentence-transformers`、`psycopg2-binary`など）をインストールしておく必要があります。
+- PostgreSQL 版本和 pgvector 版本需要在原 PC 和新 PC 之间保持兼容。
+- 如果数据量较大，备份和恢复可能需要较长时间。
+- 在新 PC 上，需要预先安装所需的 Python 包（`sentence-transformers`、`psycopg2-binary` 等）。
 
-## ディレクトリ構造
+## 目录结构
 
 ```
 mcp-rag-server/
 ├── data/
-│   ├── source/        # 原稿ファイル（階層構造対応）
-│   │   ├── markdown/  # マークダウンファイル
-│   │   ├── docs/      # ドキュメントファイル
-│   │   └── slides/    # プレゼンテーションファイル
-│   └── processed/     # 処理済みファイル（テキスト抽出済み）
-│       └── file_registry.json  # 処理済みファイルの情報（差分インデックス用）
+│   ├── source/        # 原始文档（支持层级结构）
+│   │   ├── markdown/  # Markdown 文件
+│   │   ├── docs/      # 文档文件
+│   │   └── slides/    # 演示文稿文件
+│   └── processed/     # 已处理文件（文本已提取）
+│       └── file_registry.json  # 已处理文件信息（用于增量索引）
 ├── docs/
-│   └── design.md      # 設計書
-├── logs/              # ログファイル
+│   └── design.md      # 需求与设计文档
+├── logs/              # 日志文件
 ├── src/
 │   ├── __init__.py
-│   ├── document_processor.py  # ドキュメント処理モジュール
-│   ├── embedding_generator.py # エンベディング生成モジュール
-│   ├── example_tool.py        # サンプルツールモジュール
-│   ├── main.py                # メインエントリーポイント
-│   ├── mcp_server.py          # MCPサーバーモジュール
-│   ├── rag_service.py         # RAGサービスモジュール
-│   ├── rag_tools.py           # RAGツールモジュール
-│   └── vector_database.py     # ベクトルデータベースモジュール
+│   ├── document_processor.py  # 文档处理模块
+│   ├── embedding_generator.py # 嵌入向量生成模块（支持本地/OpenAI 兼容 API）
+│   ├── example_tool.py        # 示例工具模块（旧版插件示例）
+│   ├── main.py                # 主入口点（支持 --transport stdio/sse）
+│   ├── mcp_server.py          # 旧版 JSON-RPC over stdio 服务器（保留兼容）
+│   ├── rag_service.py         # RAG 服务模块
+│   ├── rag_tools.py           # RAG 工具模块（含 SDK 路径）
+│   ├── server.py              # SDK 服务器工厂、ToolRegistry、传输运行函数
+│   └── vector_database.py     # 向量数据库模块
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── test_document_processor.py
 │   ├── test_embedding_generator.py
 │   ├── test_example_tool.py
-│   ├── test_mcp_server.py
+│   ├── test_mcp_server.py       # 旧版服务器单元测试
 │   ├── test_rag_service.py
 │   ├── test_rag_tools.py
+│   ├── test_server.py           # SDK 服务器单元测试（anyio）
+│   ├── test_sse_transport.py    # SSE 传输集成测试（真实 HTTP 服务器）
 │   └── test_vector_database.py
-├── .env           # 環境変数設定ファイル
+├── .env           # 环境变量设置文件
 ├── .gitignore
 ├── LICENSE
 ├── pyproject.toml
 └── README.md
 ```
 
-## ライセンス
+## 许可证
 
-このプロジェクトはMITライセンスの下で公開されています。詳細は[LICENSE](LICENSE)ファイルを参照してください。
+本项目基于 MIT 许可证发布。详情请参阅 [LICENSE](LICENSE) 文件。
